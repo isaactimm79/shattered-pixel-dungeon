@@ -9,19 +9,34 @@ import com.shatteredpixel.shatteredpixeldungeon.sprites.ItemSprite;
 import com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap;
 import com.watabou.noosa.BitmapText;
 import com.watabou.noosa.Camera;
-import com.watabou.noosa.Game;
 import com.watabou.noosa.ui.Component;
-import com.watabou.utils.Point;
-import com.watabou.utils.PointF;
 
+/**
+ * Zero-allocation realtime interaction prompt.
+ * Optimized for 60 FPS with no GC pressure.
+ */
 public class RealtimeInteractionPrompt extends Component {
 
     private static final float RANGE = 1.6f;
 
     private final BitmapText nameLabel;
     private final ItemSprite highlightSprite;
+
+    // State tracking
     private int targetCell = -1;
     private int lastImageId = -1;
+    private int lastTargetCell = -1;
+    private String lastHeapName = null;
+
+    // Cached level dimensions (updated when level changes)
+    private int cachedLevelWidth = -1;
+
+    // Zero-allocation: Reusable coordinate objects (instance fields)
+    // These are mutated in-place instead of creating new objects every frame
+    private float tempWorldX;
+    private float tempWorldY;
+    private float tempScreenX;
+    private float tempScreenY;
 
     public RealtimeInteractionPrompt() {
         super();
@@ -32,26 +47,33 @@ public class RealtimeInteractionPrompt extends Component {
         highlightSprite.visible = false;
         add(highlightSprite);
 
-        // 2. Setup the Text (UI Layer)
+        // 2. Setup the Text (Game Layer - moved from UI layer for simpler math)
         nameLabel = new BitmapText(PixelScene.pixelFont);
         nameLabel.hardlight(0xFFEEAA);
         nameLabel.visible = false;
-        // Slightly reduced label size for less visual clutter
         nameLabel.scale.set(0.7f);
+        nameLabel.camera = Camera.main; // CRITICAL: bind to world camera for zero-allocation positioning
         add(nameLabel);
     }
 
     @Override
     public void update() {
         super.update();
-        // 1) HARD SAFETY CHECKS: bail out during transitions or when input/UI should be disabled
-        if (!RealtimeInput.isEnabled() || 
-                Dungeon.hero == null || 
+
+        // HARD SAFETY CHECKS: bail out during transitions or when input/UI should be disabled
+        if (!RealtimeInput.isEnabled() ||
+                Dungeon.hero == null ||
                 !Dungeon.hero.ready || // hero not ready during level transitions
                 Dungeon.level == null) {
             hideAll();
             return;
         }
+
+        // Update cached level width if level changed
+        if (cachedLevelWidth != Dungeon.level.width()) {
+            cachedLevelWidth = Dungeon.level.width();
+        }
+
         try {
             Heap best = findClosestInteractableHeap();
             if (best == null) {
@@ -63,6 +85,7 @@ public class RealtimeInteractionPrompt extends Component {
             Item item = best.peek();
             targetCell = best.pos;
             boolean isContainer = best.type != Heap.Type.HEAP && best.type != Heap.Type.FOR_SALE;
+
             if (isContainer || item != null) {
                 // Update visual if changed (track heap types with negative keys to avoid collisions)
                 int desiredKey = isContainer ? (-100 - best.type.ordinal()) : item.image();
@@ -77,59 +100,67 @@ public class RealtimeInteractionPrompt extends Component {
                     highlightSprite.color(0xFFFFFF);
                     lastImageId = desiredKey;
                 }
+
                 // Constant alpha (no flashing)
                 highlightSprite.alpha(0.17f);
                 highlightSprite.visible = true;
 
-                // --- PRECISE WORLD POSITIONING USING ItemSprite.worldToCamera ---
-                // Slightly upscale the silhouette, then compute exact world TL for this cell
+                // --- ZERO-ALLOCATION POSITIONING: Use raw grid math ---
+                // Convert cell position to world coordinates using raw math (no allocations)
+                int tileX = targetCell % cachedLevelWidth;
+                int tileY = targetCell / cachedLevelWidth;
+
+                // Calculate world position using cached tile size
                 float overlayScale = 1.01f;
                 highlightSprite.scale.set(overlayScale);
                 highlightSprite.origin.set(0, 0);
-                PointF worldTL = highlightSprite.worldToCamera(targetCell);
-                highlightSprite.x = worldTL.x;
-                highlightSprite.y = worldTL.y;
+
+                // Raw math: tileToWorld equivalent without allocation
+                tempWorldX = tileX * DungeonTilemap.SIZE;
+                tempWorldY = tileY * DungeonTilemap.SIZE;
+
+                highlightSprite.x = tempWorldX;
+                highlightSprite.y = tempWorldY;
             } else {
                 // No item and not a container we render
                 highlightSprite.visible = false;
             }
 
-            // --- TEXT LOGIC (Screen/UI Space) ---
-            nameLabel.text(getHeapName(best));
-            nameLabel.visible = true;
-
-            nameLabel.measure();
-
-            float labelX;
-            float labelY;
-
-            if (highlightSprite.visible) {
-                // Center directly under the rendered silhouette bottom-center
-                // 1) Use the same world TL we used to place the sprite
-                PointF spriteTL = highlightSprite.worldToCamera(targetCell);
-                float spriteBottomCenterX = spriteTL.x + highlightSprite.width() / 2f;
-                float spriteBottomY = spriteTL.y + highlightSprite.height();
-
-                // 2) Convert bottom-center to UI coordinates
-                Point bcScreen = Camera.main.cameraToScreen(spriteBottomCenterX, spriteBottomY);
-                PointF bcUI = PixelScene.uiCamera.screenToCamera(bcScreen.x, bcScreen.y);
-
-                // 3) Center horizontally under the sprite; add small padding below
-                labelX = bcUI.x - (nameLabel.width() / 2f);
-                labelY = bcUI.y + 2f;
-            } else {
-                // Fallback: center under tile
-                PointF worldTL = DungeonTilemap.tileToWorld(targetCell);
-                Point screen = Camera.main.cameraToScreen(worldTL.x, worldTL.y);
-                PointF ui = PixelScene.uiCamera.screenToCamera(screen.x, screen.y);
-                float zoom = Camera.main.zoom;
-                float tileSizeUI = DungeonTilemap.SIZE * zoom;
-                labelX = ui.x + (tileSizeUI / 2f) - (nameLabel.width() / 2f);
-                labelY = ui.y + tileSizeUI + 2f;
+            // --- TEXT LOGIC: Update only when heap changes (caching optimization) ---
+            if (targetCell != lastTargetCell) {
+                String heapName = getHeapName(best);
+                // Only update text if it actually changed (avoids redundant setText + measure)
+                if (heapName != null && !heapName.equals(lastHeapName)) {
+                    nameLabel.text(heapName);
+                    nameLabel.measure();
+                    lastHeapName = heapName;
+                }
+                lastTargetCell = targetCell;
             }
 
-            nameLabel.x = labelX;
-            nameLabel.y = labelY;
+            nameLabel.visible = true;
+
+            // --- ZERO-ALLOCATION LABEL POSITIONING (World Space) ---
+            if (highlightSprite.visible) {
+                // Position label directly under sprite using raw math
+                // Sprite bottom-center X coordinate
+                float spriteBottomCenterX = tempWorldX + highlightSprite.width() / 2f;
+                float spriteBottomY = tempWorldY + highlightSprite.height();
+
+                // Center label horizontally under sprite; add small padding below
+                nameLabel.x = spriteBottomCenterX - (nameLabel.width() / 2f);
+                nameLabel.y = spriteBottomY + 2f;
+            } else {
+                // Fallback: center under tile using raw math (no allocations)
+                int tileX = targetCell % cachedLevelWidth;
+                int tileY = targetCell / cachedLevelWidth;
+
+                tempWorldX = tileX * DungeonTilemap.SIZE;
+                tempWorldY = tileY * DungeonTilemap.SIZE;
+
+                nameLabel.x = tempWorldX + (DungeonTilemap.SIZE / 2f) - (nameLabel.width() / 2f);
+                nameLabel.y = tempWorldY + DungeonTilemap.SIZE + 2f;
+            }
         } catch (Exception e) {
             // During level transitions or any unexpected state, fail silently for this frame
             hideAll();
@@ -141,13 +172,28 @@ public class RealtimeInteractionPrompt extends Component {
         highlightSprite.visible = false;
         targetCell = -1;
         lastImageId = -1;
+        lastTargetCell = -1;
+        lastHeapName = null;
     }
 
+    /**
+     * Finds the closest interactable heap within range.
+     * Optimized with defensive null checks and cached level width.
+     */
     private Heap findClosestInteractableHeap() {
+        // DEFENSIVE NULL CHECKS: Avoid relying on exception handling for control flow
+        if (Dungeon.level == null || Dungeon.hero == null) {
+            return null;
+        }
+
+        // Early exit if no heaps exist
+        if (Dungeon.level.heaps == null || Dungeon.level.heaps.size() == 0) {
+            return null;
+        }
+
         float bestDist = Float.MAX_VALUE;
         Heap best = null;
 
-        int w = Dungeon.level.width();
         float hx = Dungeon.hero.exactX; // Use exact sub-pixel position
         float hy = Dungeon.hero.exactY;
 
@@ -160,13 +206,13 @@ public class RealtimeInteractionPrompt extends Component {
             boolean showable = h.type != Heap.Type.HEAP || !h.isEmpty();
             if (!showable) continue;
 
-            // Euclidean Distance Check
-            int cx = h.pos % w;
-            int cy = h.pos / w;
+            // Euclidean Distance Check using cached level width
+            int cx = h.pos % cachedLevelWidth;
+            int cy = h.pos / cachedLevelWidth;
             float dx = cx - hx;
             float dy = cy - hy;
             float dist = (float) Math.sqrt(dx * dx + dy * dy);
-            
+
             if (dist <= RANGE && dist < bestDist) {
                 bestDist = dist;
                 best = h;
