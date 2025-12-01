@@ -212,6 +212,12 @@ public class Hero extends Char {
 	private int lastDirX = 0;
 	private int lastDirY = 0;
 
+	// Zero-allocation: Reusable PointF for sprite positioning (avoids 120 allocations/sec @ 60 FPS)
+	private final com.watabou.utils.PointF tempSpritePos = new com.watabou.utils.PointF();
+
+	// Zero-allocation: Reusable scaling factors for collision sliding (avoids array allocation when blocked)
+	private static final float[] SLIDE_SCALES = new float[]{0.5f, 0.25f};
+
 
 	{
 
@@ -3048,8 +3054,8 @@ public class Hero extends Char {
 
 			// 4) reduced-step attempts (two-pass with smaller increments)
 			if (!moved) {
-				float[] scales = new float[]{0.5f, 0.25f};
-				for (float s : scales) {
+				// ZERO-ALLOCATION: Use static SLIDE_SCALES instead of allocating new array
+				for (float s : SLIDE_SCALES) {
 					float sx = stepX * s;
 					float sy = stepY * s;
 
@@ -3101,12 +3107,20 @@ public class Hero extends Char {
 		int w = Dungeon.level.width();
 		int nx = (int)(exactX + 0.5f);
 		int ny = (int)(exactY + 0.5f);
-		int cell = nx + ny * w;
-		com.watabou.utils.PointF base = sprite.worldToCamera(cell);
-				float offX = (float)((exactX - nx) * com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap.SIZE);
 
+		// ZERO-ALLOCATION: Use raw grid math instead of sprite.worldToCamera() (which allocates)
+		// Convert grid cell to world coordinates directly
+		float baseX = nx * com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap.SIZE;
+		float baseY = ny * com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap.SIZE;
+
+		// Calculate sub-tile offset from exact position
+		float offX = (float)((exactX - nx) * com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap.SIZE);
 		float offY = (float)((exactY - ny) * com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap.SIZE);
-		sprite.point(new com.watabou.utils.PointF(base.x + offX, base.y + offY));
+
+		// ZERO-ALLOCATION: Reuse tempSpritePos instead of creating new PointF
+		tempSpritePos.x = baseX + offX;
+		tempSpritePos.y = baseY + offY;
+		sprite.point(tempSpritePos);
 	}
 
 	
