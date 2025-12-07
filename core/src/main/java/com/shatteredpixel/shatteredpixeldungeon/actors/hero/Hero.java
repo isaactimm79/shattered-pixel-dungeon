@@ -2942,10 +2942,26 @@ public class Hero extends Char {
 			if (c == this) continue;
 			float cx = (c.pos % w);
 			float cy = (c.pos / w);
+
+			// Distance from target position to character
 			float dx = sx - cx;
 			float dy = sy - cy;
-			if (dx*dx + dy*dy < rrSq) {
-				return false;
+			float targetDistSq = dx*dx + dy*dy;
+
+			// If target position would collide...
+			if (targetDistSq < rrSq) {
+				// Calculate current distance from hero to character
+				float currentDx = exactX - cx;
+				float currentDy = exactY - cy;
+				float currentDistSq = currentDx*currentDx + currentDy*currentDy;
+
+				// Allow "escape movement": if moving AWAY from the character, allow it
+				// even if still within collision radius (this prevents getting stuck)
+				if (targetDistSq <= currentDistSq) {
+					// Moving closer or staying same distance - block it
+					return false;
+				}
+				// Moving away - allow it (escape movement)
 			}
 		}
 		return true;
@@ -2957,7 +2973,29 @@ public class Hero extends Char {
 		int ny = (int)(sy + 0.5f);
 		int cell = nx + ny * w;
 		Char ch = Actor.findChar(cell);
-		return ch != null && ch != this;
+		if (ch == null || ch == this) return false;
+
+		// If there's a character at this grid cell, check if we're moving away from it
+		// This allows escape movement when stuck in the same grid cell as an enemy
+		float cx = (ch.pos % w);
+		float cy = (ch.pos / w);
+
+		// Distance from target position to character
+		float targetDx = sx - cx;
+		float targetDy = sy - cy;
+		float targetDistSq = targetDx*targetDx + targetDy*targetDy;
+
+		// Distance from current position to character
+		float currentDx = exactX - cx;
+		float currentDy = exactY - cy;
+		float currentDistSq = currentDx*currentDx + currentDy*currentDy;
+
+		// If moving away from the occupant, allow it (escape movement)
+		if (targetDistSq > currentDistSq) {
+			return false; // Not blocking - allow escape
+		}
+
+		return true; // Blocking - moving closer or same distance
 	}
 
 
