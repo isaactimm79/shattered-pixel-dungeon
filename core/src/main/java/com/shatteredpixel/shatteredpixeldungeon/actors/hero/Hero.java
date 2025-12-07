@@ -2935,36 +2935,65 @@ public class Hero extends Char {
 		if (!(Dungeon.level.passable[cell] || Dungeon.level.avoid[cell])) return false;
 		if (Dungeon.level.pit[cell] && !Dungeon.level.solid[cell]) return false;
 
-		// Character collision: treat chars as circles centered in their tiles
+		// Character collision: improved multi-enemy handling
+		// Strategy: Find closest enemy and allow movement if it improves the situation
 		float rr = (COLLISION_RADIUS + MOB_COLLISION_RADIUS);
 		float rrSq = rr * rr;
+
+		// Find current minimum distance to any character
+		float currentMinDistSq = Float.MAX_VALUE;
 		for (Char c : Actor.chars()) {
 			if (c == this) continue;
 			float cx = (c.pos % w);
 			float cy = (c.pos / w);
+			float currentDx = exactX - cx;
+			float currentDy = exactY - cy;
+			float currentDistSq = currentDx*currentDx + currentDy*currentDy;
+			currentMinDistSq = Math.min(currentMinDistSq, currentDistSq);
+		}
 
-			// Distance from target position to character
+		// Find target minimum distance to any character
+		float targetMinDistSq = Float.MAX_VALUE;
+		boolean wouldCollide = false;
+		for (Char c : Actor.chars()) {
+			if (c == this) continue;
+			float cx = (c.pos % w);
+			float cy = (c.pos / w);
 			float dx = sx - cx;
 			float dy = sy - cy;
 			float targetDistSq = dx*dx + dy*dy;
+			targetMinDistSq = Math.min(targetMinDistSq, targetDistSq);
 
-			// If target position would collide...
 			if (targetDistSq < rrSq) {
-				// Calculate current distance from hero to character
-				float currentDx = exactX - cx;
-				float currentDy = exactY - cy;
-				float currentDistSq = currentDx*currentDx + currentDy*currentDy;
-
-				// Allow "escape movement": if moving AWAY from the character, allow it
-				// even if still within collision radius (this prevents getting stuck)
-				if (targetDistSq <= currentDistSq) {
-					// Moving closer or staying same distance - block it
-					return false;
-				}
-				// Moving away - allow it (escape movement)
+				wouldCollide = true;
 			}
 		}
-		return true;
+
+		// If we wouldn't collide, allow movement
+		if (!wouldCollide) return true;
+
+		// If stuck (very close to characters), use reduced collision radius
+		boolean isStuck = currentMinDistSq < (rr * 0.7f) * (rr * 0.7f); // 70% of normal radius
+
+		if (isStuck) {
+			// When stuck, allow any movement that improves the worst collision
+			// This allows squeezing through tight spaces between multiple enemies
+			if (targetMinDistSq > currentMinDistSq) {
+				return true; // Moving away from closest threat
+			}
+			// Also allow if target is barely better or equal (prevents total lockup)
+			if (targetMinDistSq >= currentMinDistSq * 0.95f) {
+				return true; // Allow nearly-same distance when stuck
+			}
+		} else {
+			// Not stuck yet - use stricter collision
+			// Allow movement if it moves away from closest character
+			if (targetMinDistSq > currentMinDistSq) {
+				return true;
+			}
+		}
+
+		return false; // Block movement
 	}
 
 	private boolean centerCellOccupied(float sx, float sy) {
@@ -2990,9 +3019,18 @@ public class Hero extends Char {
 		float currentDy = exactY - cy;
 		float currentDistSq = currentDx*currentDx + currentDy*currentDy;
 
+		// Check if we're stuck (very close to this or any other character)
+		float rr = (COLLISION_RADIUS + MOB_COLLISION_RADIUS);
+		boolean isStuck = currentDistSq < (rr * 0.7f) * (rr * 0.7f);
+
 		// If moving away from the occupant, allow it (escape movement)
 		if (targetDistSq > currentDistSq) {
 			return false; // Not blocking - allow escape
+		}
+
+		// If stuck and moving almost away (within 5%), allow it to prevent lockup
+		if (isStuck && targetDistSq >= currentDistSq * 0.95f) {
+			return false; // Allow nearly-perpendicular movement when stuck
 		}
 
 		return true; // Blocking - moving closer or same distance
