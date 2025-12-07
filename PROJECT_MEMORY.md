@@ -13,8 +13,23 @@ Convert the turn-based engine into a Real-Time Action RPG (WASD Movement, Space 
 * Turn Logic: We bypass standard `act/operate` methods for containers. We use "Direct Logic" (checking keys manually, calling `.open()` directly) to avoid turn-based thread gating.
 
 ## 4. Work Log (Recent)
+* [FIX] Added missing nested interface Hero.Doom in Hero.java to resolve compile errors: ToxicGas, Burning, Corrosion, Hunger, Poison, and Chasm all implement this marker for onDeath callbacks used by Hero.die().
+* [FIX] Implemented Hero.onLevelSwitched(), called by Dungeon.switchLevel(). It resets realtime state and re-initializes exactX/exactY to the new grid position (initExactFromPos) and clears attackCooldown to 0.
+* [FIX] Implemented Hero.resurrect(): restores HP to 50%, clears non-persistent buffs, and applies LostInventory so items are disabled until the LostBackpack is recovered. This satisfies InterlevelScene.resurrect() calls.
+* [COMPLETED] Hero realtime collision and sliding: Implemented circle-vs-circle collision against characters during realtime movement while preserving tile occupancy rules.
+  - Constants: COLLISION_RADIUS=0.30 (hero), MOB_COLLISION_RADIUS=0.28 (enemies).
+  - Movement checks use isPassableCenter(...) for terrain + circle collisions, and centerCellOccupied(...) to prevent co-occupying a grid tile.
+  - Result: no more “square hitbox” sticking when moving around enemies; sliding along edges feels natural.
+* [COMPLETED] Pointer selection: Hero/mobs now use sprite.getHitbox() (tight/TILE/CUSTOM) for click/hover tests instead of full sprite bounds.
+* [FIX] Compile error in Hero.java (“reached end of file while parsing”): fixed by completing onOperateComplete(), resetting operatePosOverride, calling super.onOperateComplete(), and closing the class brace.
+* [FIX] Restored Hero.search(boolean intentional): reveals nearby secrets in FOV, shows CheckedCell effects when intentional, and spends TIME_TO_SEARCH and HUNGER_FOR_SEARCH only on intentional searches. Fixes missing method errors in Toolbar and CellSelector.
+
+
+
 * [BUILD] Fixed Gradle error by replacing project(':SPD-classes') dependency with a file-based jar in services (news/updates) modules. All affected build.gradle now use SPD-classes/build/libs/SPD-classes-${appVersionName}.jar.
 * [BUILD] Added GDX core dependency (com.badlogicgames.gdx:gdx:$gdxVersion) to services:news:shatteredNews and services:updates:githubUpdates so Net/XmlReader imports compile.
+* [BUILD] FIX: Changed services:news:shatteredNews to depend on project(':SPD-classes') instead of a file-based jar to satisfy Gradle task wiring (avoids missing input warning for compileJava).
+
 * [BUILD] Added SPD-classes jar and gdx core to core module dependencies to resolve com.watabou.noosa.Game and related classes.
 * [BUILD] Added gdx-controllers-core to core to resolve com.badlogic.gdx.controllers.ControllerListener and input APIs.
 * [BUILD] Fixed repositories: replaced invalid central.sonatype.com UI URL with proper Sonatype snapshots repo (s01.oss.sonatype.org).
@@ -34,6 +49,11 @@ Convert the turn-based engine into a Real-Time Action RPG (WASD Movement, Space 
 * [COMPLETED] Containers now use chest/remains/tomb silhouettes: when targeting non-HEAP heaps, overlay renders the heap sprite in pure white instead of the contained item.
 * [TUNED] Reduced item name label scale to 0.7x to keep it compact below the sprite.
 * [TUNED] Disabled overlay flashing: highlight silhouette now uses constant alpha (0.85) instead of pulsing.
+* [COMPLETED] Enemy hitboxes: Added unified hitbox system to CharSprite with TILE/CUSTOM/TIGHT modes. Default MobSprite now uses TIGHT hitboxes computed from opaque sprite pixels (+1px padding). HeroSprite remains as-is (can opt-in later).
+* [COMPLETED] Hero realtime movement collision: replaced tile-occupancy blocking with circle-vs-circle collision and sliding against characters while preserving grid occupancy. Implemented in `Hero.java` via `isTilePassableAt` (circle checks), `centerCellOccupied` (no co-occupancy), and updated `attemptSlide` to use both.
+* [FIX] Compile error in `Hero.java` (reached end of file while parsing): closed missing braces in `search(boolean intentional)` and finalized class/blocks.
+
+
 
 
 
@@ -86,6 +106,22 @@ Convert the turn-based engine into a Real-Time Action RPG (WASD Movement, Space 
 * **Math Rule (PERFORMANCE):** Always use `distanceSquared` (distSq) for real-time radius checks. **Never use `Math.sqrt()` in `update()` loops** - it's expensive and unnecessary for distance comparisons.
 * **Zero-Allocation Rule:** Hot paths (update loops, distance checks, scanning) must avoid object allocation. Use raw float math, reuse calculations, and prefer primitive comparisons.
 
+## 6. Dev/Debug Features Reference
+- Debug mode check is DeviceCompat.isDebug(), which returns true when Game.version contains "INDEV".
+- New: Debug Panel (WndDebug) accessible via a small prefs icon on the top-right of the HUD (debug builds only). Contains toggles:
+  - Invincibility: ON/OFF. Implemented via mechanics.DebugConfig.godMode; Hero.damage short-circuits when enabled.
+- Effects when debug is true:
+  - TitleScene: Long-press Play instantly starts a new run at slot 1 (skips StartScene).
+  - InterlevelScene: Transitions use fadeTime=0 for instant loading; pre-generates prior levels for consistent seeds during descend in debug.
+  - HeroSelectScene: Daily/challenge/seed access restrictions are bypassed (no victory required).
+  - HeroClass: All classes are treated as unlocked.
+  - Document: Adventurer's Guide pages auto-marked as read for faster UI access.
+  - WndHeroInfo: Subclass and armor ability info tabs are available regardless of unlocks.
+  - WndRanking: "Copy Seed" button is available even without the Victory badge.
+
+How to enable debug locally:
+- DesktopLauncher now forces Game.version to include "INDEV" for dev runs (appends -INDEV if a version exists, or sets to INDEV when empty). DeviceCompat.isDebug() will return true in dev runs.
+
 ## 6. Next Sprint: Real-Time Combat
 * **Goal:** Implement "Click-to-Attack" or "Space-to-Attack" logic for real-time combat.
 * **Challenge:** Syncing attack speed (Cooldowns) with real-time animations so the player can't spam-click 100 attacks per second.
@@ -96,5 +132,40 @@ Convert the turn-based engine into a Real-Time Action RPG (WASD Movement, Space 
 1.  ✅ COMPLETED: `Toolbar.java` fix allows chests to open.
 2.  Tune glow radius/alpha per tileset zoom and add localization for prompt text.
 3.  Add "Slide" interpolation so the hero doesn't teleport when snapping to chest coordinates.
+
+## 8. Realtime Enemies (In Progress)
+- [NOTE] Enemy sprite hitboxes (tight) affect selection/hover only; movement blocking remains governed by tile occupancy plus the hero’s new circle collision checks.
+
+- [ADDED] RealtimeManager: ticks enemies each frame when realtime is enabled and no blocking UI is open.
+- [UPDATED] GameScene.update(): now calls RealtimeManager.update(deltaTime) alongside hero realtime updates.
+- [UPDATED] Mob.act(): if realtime enabled, skip turn AI and yield immediately (spend TICK).
+- [ADDED] Mob.updateRealtime(dt): minimal HUNTING/WANDERING AI with cooldowns, greedy step movement, and direct melee using existing combat logic without spending turns.
+- [SAFEGUARDS] Movement respects passability, occupancy, and large-character open-space checks; no turn scheduler calls from realtime AI.
+- [FIX] Build error: replaced Level.distance(...) with Dungeon.level.distance(...) in Mob.updateRealtime and computeStepTowards.
+
+
+Next steps for enemies:
+- Verify and tune tight hitboxes per enemy; add overrides for large/boss sprites spanning multiple tiles. Consider enabling TIGHT for HeroSprite.
+- Tune attack/move cadence per mob type; map attackDelay() to fair realtime rates.
+- Add ranged AI support and LOS checks; integrate existing canAttackWithExtraReach for champions.
+- Pause updates on inventory/map screens with a global pause state.
+- Visual polish: optional quick attack swing for mobs without triggering onAttackComplete time spend.
+
+Next steps for hero movement/combat:
+- Consider per-mob collision radii (derive from sprite or size flags) instead of a global MOB_COLLISION_RADIUS.
+- Optional: expose debug toggles to visualize hero/mob collision circles to aid tuning.
+- Evaluate enabling tight hitbox on HeroSprite and ensure it doesn’t regress targeting UX.
+
+
+## 9. Realtime Movement & Collision (NEW)
+- [HERO] Sub-tile movement: `exactX/exactY`, smooth movement in `Hero.updateRealtime`.
+- [COLLISION] Circle vs circle for hero vs mobs: `COLLISION_RADIUS=0.30`, `MOB_COLLISION_RADIUS=0.28` (tunable). Terrain passability respected; pits/solids still block.
+- [SLIDING] Updated `attemptSlide` to allow sliding along character edges; uses `isPassableCenter(...)` and `centerCellOccupied(...)` to prevent sharing tiles while avoiding square “sticking”.
+- [SELECTION] Tight sprite hitboxes used for click/hover selection (CharSprite/MobSprite). Movement physics remain circle-based to preserve performance and simplicity.
+- [TUNING] Radii can be adjusted to change “fatness” feel (hero or mob). Per-mob radii optional future improvement.
+
+
+
+
 
 
