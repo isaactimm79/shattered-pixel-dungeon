@@ -56,6 +56,7 @@ import com.watabou.noosa.tweeners.Tweener;
 import com.watabou.utils.Callback;
 import com.watabou.utils.PointF;
 import com.watabou.utils.Random;
+import com.watabou.utils.RectF;
 
 import java.nio.Buffer;
 import java.util.HashSet;
@@ -123,7 +124,18 @@ public class CharSprite extends MovieClip implements Tweener.Listener, MovieClip
 	
 	protected boolean sleeping = false;
 
-	public Char ch;
+		public Char ch;
+
+	// Hitbox configuration
+	public enum HitboxMode { TILE, CUSTOM, TIGHT }
+	protected HitboxMode hbMode = HitboxMode.TILE;
+	// CUSTOM/TILE hitbox in local sprite pixels (top-left origin)
+	protected float hbW = 16f, hbH = 16f;
+	protected float hbOffsetX = 0f, hbOffsetY = 0f;
+	// TIGHT mode settings
+	protected int tightPadding = 1;       // pixels of padding added around tight bounds
+	protected float alphaThreshold = 0.01f; // 1% alpha threshold considered opaque
+	protected RectF tightBoundsLocal = null; // cached tight bounds in local sprite pixels
 
 	//used to prevent the actor associated with this sprite from acting until movement completes
 	public volatile boolean isMoving = false;
@@ -131,8 +143,132 @@ public class CharSprite extends MovieClip implements Tweener.Listener, MovieClip
 	public CharSprite() {
 		super();
 		listener = this;
+		}
+
+	// Hitbox API
+	public void setHitboxTile(){
+		hbMode = HitboxMode.TILE;
+		hbW = width();
+		hbH = height();
+		hbOffsetX = 0f;
+		hbOffsetY = 0f;
 	}
-	
+
+	public void setHitboxCustom(float w, float h, float offX, float offY){
+		hbMode = HitboxMode.CUSTOM;
+		hbW = w; hbH = h; hbOffsetX = offX; hbOffsetY = offY;
+	}
+
+	public void setHitboxTight(int paddingPx, float alphaThresh){
+		hbMode = HitboxMode.TIGHT;
+		tightPadding = Math.max(0, paddingPx);
+		alphaThreshold = Math.max(0f, Math.min(1f, alphaThresh));
+		tightBoundsLocal = null; // recompute on next query
+	}
+
+	// World-space hitbox rectangle matching current sprite placement
+	public RectF getHitbox(){
+		switch (hbMode){
+			case CUSTOM:
+			case TILE: {
+				float l = x + hbOffsetX;
+				float t = y + hbOffsetY;
+				return new RectF(l, t, l + hbW, t + hbH);
+			}
+			case TIGHT:
+			default: {
+				RectF local = ensureTightBounds();
+				return new RectF(x + local.left, y + local.top, x + local.right, y + local.bottom);
+			}
+		}
+	}
+
+	protected RectF ensureTightBounds(){
+		if (tightBoundsLocal != null) return new RectF(tightBoundsLocal);
+		if (texture == null){
+			// fallback to full sprite frame
+			tightBoundsLocal = new RectF(0, 0, width(), height());
+			return new RectF(tightBoundsLocal);
+		}
+
+		// Gather all animation frames (UV rects) for this sprite
+		RectF[] uvFrames = gatherAllFrames();
+		if (uvFrames == null || uvFrames.length == 0){
+			tightBoundsLocal = new RectF(0, 0, width(), height());
+			return new RectF(tightBoundsLocal);
+		}
+
+		int texW = texture.width;
+		int texH = texture.height;
+
+		// We assume consistent frame dimensions for this sprite
+		int baseLeft = Math.round(uvFrames[0].left * texW);
+		int baseTop = Math.round(uvFrames[0].top * texH);
+		int baseW = Math.max(1, Math.round(uvFrames[0].width() * texW));
+		int baseH = Math.max(1, Math.round(uvFrames[0].height() * texH));
+
+		int minX = baseW, minY = baseH, maxX = -1, maxY = -1;
+
+		for (RectF uv : uvFrames){
+			if (uv == null) continue;
+			int rx = Math.round(uv.left * texW);
+			int ry = Math.round(uv.top * texH);
+			int rw = Math.max(1, Math.round(uv.width() * texW));
+			int rh = Math.max(1, Math.round(uv.height() * texH));
+
+			// Skip frames with mismatched sizes to avoid misalignment
+			if (rw != baseW || rh != baseH) continue;
+
+			for (int yPix = 0; yPix < rh; yPix++){
+				for (int xPix = 0; xPix < rw; xPix++){
+					int argb = texture.getPixel(rx + xPix, ry + yPix);
+					int a = (argb >>> 24) & 0xFF;
+					if (a >= (int)(alphaThreshold * 255f)){
+						if (xPix < minX) minX = xPix;
+						if (yPix < minY) minY = yPix;
+						if (xPix > maxX) maxX = xPix;
+						if (yPix > maxY) maxY = yPix;
+					}
+				}
+			}
+		}
+
+		if (maxX < minX || maxY < minY){
+			// fully transparent? fallback to full frame
+			minX = 0; minY = 0; maxX = baseW - 1; maxY = baseH - 1;
+		}
+
+		// Apply padding and clamp
+		int pad = Math.max(0, tightPadding);
+		int left = Math.max(0, minX - pad);
+		int top = Math.max(0, minY - pad);
+		int right = Math.min(baseW, maxX + 1 + pad);
+		int bottom = Math.min(baseH, maxY + 1 + pad);
+
+		tightBoundsLocal = new RectF(left, top, right, bottom);
+		return new RectF(tightBoundsLocal);
+	}
+
+	private RectF[] gatherAllFrames(){
+		// Combine unique UV rects across our animations
+		java.util.ArrayList<RectF> frames = new java.util.ArrayList<>();
+		addFrames(frames, idle);
+		addFrames(frames, run);
+		addFrames(frames, attack);
+		addFrames(frames, operate);
+		addFrames(frames, zap);
+		addFrames(frames, die);
+		return frames.toArray(new RectF[0]);
+	}
+
+	private void addFrames(java.util.ArrayList<RectF> out, Animation anim){
+		if (anim == null || anim.frames == null) return;
+		for (RectF f : anim.frames){
+			if (f == null) continue;
+			out.add(f);
+		}
+	}
+
 	@Override
 	public void play(Animation anim) {
 		//Shouldn't interrupt the dieing animation

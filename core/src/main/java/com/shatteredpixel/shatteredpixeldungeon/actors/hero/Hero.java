@@ -194,12 +194,38 @@ import java.util.LinkedHashMap;
 
 public class Hero extends Char {
 
+	public interface Doom { void onDeath(); }
+
+	// Called when Dungeon.switchLevel positions the hero on a new level
+		public void onLevelSwitched(){
+		// re-init exact coordinates to match new grid pos and reset realtime state
+		exactInit = false;
+		attackCooldown = 0f;
+		initExactFromPos();
+	}
+
+	// Called by InterlevelScene when reviving via unblessed ankh
+	public void resurrect() {
+		// Restore health to a safe amount
+		HP = Math.max(1, HT / 2);
+
+		// Remove non-persistent buffs and reapply core ones as needed via other systems
+		for (Buff b : buffs().toArray(new Buff[0])){
+			if (!b.revivePersists) b.detach();
+		}
+
+		// Inventory is considered lost until the player recovers the LostBackpack
+		Buff.affect(this, LostInventory.class);
+	}
+
+
 	// Sub-tile exact position (in tile units, not pixels). Used in realtime mode for smooth movement.
 	public float exactX;
 	public float exactY;
 	private boolean exactInit = false;
 		private static final float REALTIME_MOVE_TILES_PER_SEC = 6.0f; // base speed; multiplied by speed()
 	private static final float COLLISION_RADIUS = 0.3f; // in tile units; 1.0 == full tile
+	private static final float MOB_COLLISION_RADIUS = 0.28f; // enemy collision radius (tune to reduce sticking)
 								private static final float PICKUP_RANGE = 1.5f; // in tiles, realtime pickup radius
 
 	// Allows operate distance checks to pass when we initiated an interact via teleport trick
@@ -1780,8 +1806,14 @@ public class Hero extends Char {
 		}
 	}
 
-	@Override
+		@Override
 	public void damage( int dmg, Object src ) {
+		// Debug invincibility: ignore all damage when enabled (debug builds only)
+		if (com.watabou.utils.DeviceCompat.isDebug()
+				&& com.shatteredpixel.shatteredpixeldungeon.mechanics.DebugConfig.godMode) {
+			return;
+		}
+
 		if (buff(TimekeepersHourglass.timeStasis.class) != null
 				|| buff(TimeStasis.class) != null) {
 			return;
@@ -2069,8 +2101,57 @@ public class Hero extends Char {
 
 			return false;
 			
+				}
+
+	}
+
+	// Reveals nearby secrets/traps. If intentional, spends time and hunger.
+	public void search(boolean intentional) {
+		if (Dungeon.level == null) return;
+
+		int w = Dungeon.level.width();
+		int h = Dungeon.level.height();
+		int cx = pos % w;
+		int cy = pos / w;
+
+		// Base radius: 1 for passive checks after movement, larger when intentional.
+		int distance = intentional ? 2 : 1;
+		// Talent: Wide Search extends radius when searching intentionally (and slightly on passive).
+		int wide = pointsInTalent(Talent.WIDE_SEARCH);
+		if (intentional) distance += wide; else if (wide > 0) distance += 1;
+
+		int ax = Math.max(0, cx - distance);
+		int bx = Math.min(w - 1, cx + distance);
+		int ay = Math.max(0, cy - distance);
+		int by = Math.min(h - 1, cy + distance);
+
+		boolean noticed = false;
+		for (int y = ay; y <= by; y++) {
+			for (int x = ax, p = ax + y * w; x <= bx; x++, p++) {
+				if (!Dungeon.level.heroFOV[p]) continue;
+				if (intentional) {
+					GameScene.effectOverFog(new CheckedCell(p, pos));
+				}
+
+				if (Dungeon.level.secret[p]) {
+					int oldValue = Dungeon.level.map[p];
+					GameScene.discoverTile(p, oldValue);
+					Dungeon.level.discover(p);
+					ScrollOfMagicMapping.discover(p);
+					noticed = true;
+				}
+			}
 		}
 
+		if (intentional) {
+			// Time and hunger cost only for manual search
+			Buff.affect(this, Hunger.class).affectHunger(-HUNGER_FOR_SEARCH);
+			spendAndNext(TIME_TO_SEARCH);
+		}
+
+		if (noticed) {
+			Sample.INSTANCE.play(Assets.Sounds.SECRET);
+		}
 	}
 	
 	public boolean handle( int cell ) {
@@ -2843,39 +2924,62 @@ public class Hero extends Char {
 			&& isTilePassableAt(tx, ty + COLLISION_RADIUS);
 	}
 
-	private boolean isTilePassableAt(float sx, float sy) {
+		private boolean isTilePassableAt(float sx, float sy) {
 		int w = Dungeon.level.width();
 		int h = Dungeon.level.height();
 		int nx = (int)(sx + 0.5f);
 		int ny = (int)(sy + 0.5f);
 		if (nx < 0 || ny < 0 || nx >= w || ny >= h) return false;
 		int cell = nx + ny * w;
+		// Terrain checks
 		if (!(Dungeon.level.passable[cell] || Dungeon.level.avoid[cell])) return false;
 		if (Dungeon.level.pit[cell] && !Dungeon.level.solid[cell]) return false;
-		// Block if another char occupies this cell (except ourselves)
+
+		// Character collision: treat chars as circles centered in their tiles
+		float rr = (COLLISION_RADIUS + MOB_COLLISION_RADIUS);
+		float rrSq = rr * rr;
+		for (Char c : Actor.chars()) {
+			if (c == this) continue;
+			float cx = (c.pos % w);
+			float cy = (c.pos / w);
+			float dx = sx - cx;
+			float dy = sy - cy;
+			if (dx*dx + dy*dy < rrSq) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private boolean centerCellOccupied(float sx, float sy) {
+		int w = Dungeon.level.width();
+		int nx = (int)(sx + 0.5f);
+		int ny = (int)(sy + 0.5f);
+		int cell = nx + ny * w;
 		Char ch = Actor.findChar(cell);
-		return ch == null || ch == this;
+		return ch != null && ch != this;
 	}
 
 
-		private void attemptSlide(float stepX, float stepY) {
+
+			private void attemptSlide(float stepX, float stepY) {
 		float targetX = exactX + stepX;
 		float targetY = exactY + stepY;
 
 		boolean moved = false;
 		// 1) try full move first
-		if (isPassableCenter(targetX, targetY)) {
+		if (isPassableCenter(targetX, targetY) && !centerCellOccupied(targetX, targetY)) {
 			exactX = targetX;
 			exactY = targetY;
 			moved = true;
 		} else {
 			// 2) try axis-aligned moves
 			boolean movedX = false;
-			if (stepX != 0 && isPassableCenter(exactX + stepX, exactY)) {
+			if (stepX != 0 && isPassableCenter(exactX + stepX, exactY) && !centerCellOccupied(exactX + stepX, exactY)) {
 				exactX += stepX;
 				moved = movedX = true;
 			}
-			if (stepY != 0 && isPassableCenter(exactX, exactY + stepY)) {
+			if (stepY != 0 && isPassableCenter(exactX, exactY + stepY) && !centerCellOccupied(exactX, exactY + stepY)) {
 				exactY += stepY;
 				moved = true;
 			}
@@ -2883,11 +2987,15 @@ public class Hero extends Char {
 			// 3) sequential pass: try X then Y, or Y then X, with full steps
 			if (!moved && stepX != 0 && stepY != 0) {
 				// X then Y
-				if (isPassableCenter(exactX + stepX, exactY) && isPassableCenter(exactX + stepX, exactY + stepY)) {
+				if (isPassableCenter(exactX + stepX, exactY)
+						&& isPassableCenter(exactX + stepX, exactY + stepY)
+						&& !centerCellOccupied(exactX + stepX, exactY + stepY)) {
 					exactX += stepX;
 					exactY += stepY;
 					moved = true;
-				} else if (isPassableCenter(exactX, exactY + stepY) && isPassableCenter(exactX + stepX, exactY + stepY)) {
+				} else if (isPassableCenter(exactX, exactY + stepY)
+						&& isPassableCenter(exactX + stepX, exactY + stepY)
+						&& !centerCellOccupied(exactX + stepX, exactY + stepY)) {
 					// Y then X
 					exactY += stepY;
 					exactX += stepX;
@@ -2903,32 +3011,39 @@ public class Hero extends Char {
 					float sy = stepY * s;
 
 					// try scaled full move
-					if ((sx != 0 || sy != 0) && isPassableCenter(exactX + sx, exactY + sy)) {
+					if ((sx != 0 || sy != 0) && isPassableCenter(exactX + sx, exactY + sy)
+							&& !centerCellOccupied(exactX + sx, exactY + sy)) {
 						exactX += sx;
 						exactY += sy;
 						moved = true;
 						break;
 					}
 					// try scaled axis moves
-					if (sx != 0 && isPassableCenter(exactX + sx, exactY)) {
+					if (sx != 0 && isPassableCenter(exactX + sx, exactY)
+							&& !centerCellOccupied(exactX + sx, exactY)) {
 						exactX += sx;
 						moved = true;
 						break;
 					}
-					if (sy != 0 && isPassableCenter(exactX, exactY + sy)) {
+					if (sy != 0 && isPassableCenter(exactX, exactY + sy)
+							&& !centerCellOccupied(exactX, exactY + sy)) {
 						exactY += sy;
 						moved = true;
 						break;
 					}
 					// try scaled sequential combos
 					if (sx != 0 && sy != 0) {
-						if (isPassableCenter(exactX + sx, exactY) && isPassableCenter(exactX + sx, exactY + sy)) {
+						if (isPassableCenter(exactX + sx, exactY)
+								&& isPassableCenter(exactX + sx, exactY + sy)
+								&& !centerCellOccupied(exactX + sx, exactY + sy)) {
 							exactX += sx;
 							exactY += sy;
 							moved = true;
 							break;
 						}
-						if (isPassableCenter(exactX, exactY + sy) && isPassableCenter(exactX + sx, exactY + sy)) {
+						if (isPassableCenter(exactX, exactY + sy)
+								&& isPassableCenter(exactX + sx, exactY + sy)
+								&& !centerCellOccupied(exactX + sx, exactY + sy)) {
 							exactY += sy;
 							exactX += sx;
 							moved = true;
@@ -2943,6 +3058,7 @@ public class Hero extends Char {
 			walkingToVisibleTrapInFog = false;
 		}
 	}
+
 
 
 	private void updateSpritePosition() {
@@ -3013,215 +3129,8 @@ public class Hero extends Char {
 			}
 			
 		}
-			// clear override after attempting chest open
-			operatePosOverride = -1;
-			curAction = null;
-
-			if (!ready) {
-				super.onOperateComplete();
-			}
-	}
-
-	public boolean search( boolean intentional ) {
-		
-		if (!isAlive()) return false;
-		
-		boolean smthFound = false;
-
-		boolean circular = pointsInTalent(Talent.WIDE_SEARCH) == 1;
-		int distance = heroClass == HeroClass.ROGUE ? 2 : 1;
-		if (hasTalent(Talent.WIDE_SEARCH)) distance++;
-		
-		boolean foresight = buff(Foresight.class) != null;
-		boolean foresightScan = foresight && !Dungeon.level.mapped[pos];
-
-		if (foresightScan){
-			Dungeon.level.mapped[pos] = true;
-		}
-
-		if (foresight) {
-			distance = Foresight.DISTANCE;
-			circular = true;
-		}
-
-		Point c = Dungeon.level.cellToPoint(pos);
-
-		TalismanOfForesight.Foresight talisman = buff( TalismanOfForesight.Foresight.class );
-		boolean cursed = talisman != null && talisman.isCursed();
-
-		int[] rounding = ShadowCaster.rounding[distance];
-
-		int left, right;
-		int curr;
-		for (int y = Math.max(0, c.y - distance); y <= Math.min(Dungeon.level.height()-1, c.y + distance); y++) {
-			if (!circular){
-				left = c.x - distance;
-			} else if (rounding[Math.abs(c.y - y)] < Math.abs(c.y - y)) {
-				left = c.x - rounding[Math.abs(c.y - y)];
-			} else {
-				left = distance;
-				while (rounding[left] < rounding[Math.abs(c.y - y)]){
-					left--;
-				}
-				left = c.x - left;
-			}
-			right = Math.min(Dungeon.level.width()-1, c.x + c.x - left);
-			left = Math.max(0, left);
-			for (curr = left + y * Dungeon.level.width(); curr <= right + y * Dungeon.level.width(); curr++){
-
-				if ((foresight || fieldOfView[curr]) && curr != pos) {
-
-					if ((foresight && (!Dungeon.level.mapped[curr] || foresightScan))){
-						GameScene.effectOverFog(new CheckedCell(curr, foresightScan ? pos : curr));
-					} else if (intentional) {
-						GameScene.effectOverFog(new CheckedCell(curr, pos));
-					}
-
-					if (foresight){
-						Dungeon.level.mapped[curr] = true;
-					}
-					
-					if (Dungeon.level.secret[curr]){
-						
-						Trap trap = Dungeon.level.traps.get( curr );
-						float chance;
-
-						//searches aided by foresight always succeed, even if trap isn't searchable
-						if (foresight){
-							chance = 1f;
-
-						//otherwise if the trap isn't searchable, searching always fails
-						} else if (trap != null && !trap.canBeSearched){
-							chance = 0f;
-
-						//intentional searches always succeed against regular traps and doors
-						} else if (intentional){
-							chance = 1f;
-						
-						//unintentional searches always fail with a cursed talisman
-						} else if (cursed) {
-							chance = 0f;
-							
-						//unintentional trap detection scales from 40% at floor 0 to 30% at floor 25
-						} else if (Dungeon.level.map[curr] == Terrain.SECRET_TRAP) {
-							chance = 0.4f - (Dungeon.depth / 250f);
-							
-						//unintentional door detection scales from 20% at floor 0 to 0% at floor 20
-						} else {
-							chance = 0.2f - (Dungeon.depth / 100f);
-						}
-
-						//don't want to let the player search though hidden doors in tutorial
-						if (SPDSettings.intro()){
-							chance = 0;
-						}
-						
-						if (Random.Float() < chance) {
-						
-							int oldValue = Dungeon.level.map[curr];
-							
-							GameScene.discoverTile( curr, oldValue );
-							
-							Dungeon.level.discover( curr );
-							
-							ScrollOfMagicMapping.discover( curr );
-							
-							if (fieldOfView[curr]) smthFound = true;
-	
-							if (talisman != null){
-								if (oldValue == Terrain.SECRET_TRAP){
-									talisman.charge(2);
-								} else if (oldValue == Terrain.SECRET_DOOR){
-									talisman.charge(10);
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-		
-		if (intentional) {
-			sprite.showStatus( CharSprite.DEFAULT, Messages.get(this, "search") );
-			sprite.operate( pos );
-			if (!Dungeon.level.locked) {
-				if (cursed) {
-					GLog.n(Messages.get(this, "search_distracted"));
-					Buff.affect(this, Hunger.class).affectHunger(TIME_TO_SEARCH - (2 * HUNGER_FOR_SEARCH));
-				} else {
-					Buff.affect(this, Hunger.class).affectHunger(TIME_TO_SEARCH - HUNGER_FOR_SEARCH);
-				}
-			}
-			spendAndNext(TIME_TO_SEARCH);
-			
-		}
-		
-		if (smthFound) {
-			GLog.w( Messages.get(this, "noticed_smth") );
-			Sample.INSTANCE.play( Assets.Sounds.SECRET );
-			interrupt();
-		}
-
-		if (foresight){
-			GameScene.updateFog(pos, Foresight.DISTANCE+1);
-		}
-
-		if (talisman != null){
-			talisman.checkAwareness();
-		}
-		
-		return smthFound;
-	}
-	
-	public void resurrect() {
-		HP = HT;
-		live();
-
-		MagicalHolster holster = belongings.getItem(MagicalHolster.class);
-
-		Buff.affect(this, LostInventory.class);
-		Buff.affect(this, Invisibility.class, 3f);
-		//lost inventory is dropped in interlevelscene
-
-		//activate items that persist after lost inventory
-		//FIXME this is very messy, maybe it would be better to just have one buff that
-		// handled all items that recharge over time?
-		for (Item i : belongings){
-			if (i instanceof EquipableItem && i.isEquipped(this)){
-				((EquipableItem) i).activate(this);
-			} else if (i instanceof CloakOfShadows && i.keptThroughLostInventory() && hasTalent(Talent.LIGHT_CLOAK)) {
-				((CloakOfShadows) i).activate(this);
-			} else if (i instanceof HolyTome  && i.keptThroughLostInventory() && hasTalent(Talent.LIGHT_READING)) {
-				((HolyTome) i).activate(this);
-			} else if (i instanceof Wand && i.keptThroughLostInventory()){
-				if (holster != null && holster.contains(i)){
-					((Wand) i).charge(this, MagicalHolster.HOLSTER_SCALE_FACTOR);
-				} else {
-					((Wand) i).charge(this);
-				}
-			} else if (i instanceof MagesStaff && i.keptThroughLostInventory()){
-				((MagesStaff) i).applyWandChargeBuff(this);
-			}
-		}
-
-		updateHT(false);
-	}
-
-		@Override
-	public void next() {
-		if (isAlive())
-			super.next();
-	}
-
-	// Called by Dungeon.switchLevel to reset realtime positioning state
-	public void onLevelSwitched() {
-		// Force re-init of exact coordinates to new grid position
-		exactInit = false;
-		initExactFromPos();
-	}
-
-
-	public static interface Doom {
-		public void onDeath();
-	}
+			// clear override
+        operatePosOverride = -1;
+        super.onOperateComplete();
+    }
 }

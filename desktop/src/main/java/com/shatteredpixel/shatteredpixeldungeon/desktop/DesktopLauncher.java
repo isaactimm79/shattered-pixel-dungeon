@@ -112,14 +112,17 @@ public class DesktopLauncher {
 			}
 		});
 		
-				Game.version = DesktopLauncher.class.getPackage().getSpecificationVersion();
+						Game.version = DesktopLauncher.class.getPackage().getSpecificationVersion();
 		if (Game.version == null) {
 			Game.version = System.getProperty("Specification-Version");
 		}
-		// Ensure a non-null version when running from IDE without manifest
+		// Mark dev builds as INDEV so DeviceCompat.isDebug() returns true
 		if (Game.version == null || Game.version.isEmpty()) {
-			Game.version = "dev";
+			Game.version = "INDEV";
+		} else if (!Game.version.contains("INDEV")) {
+			Game.version = Game.version + "-INDEV";
 		}
+
 		
 		try {
 			Game.versionCode = Integer.parseInt(DesktopLauncher.class.getPackage().getImplementationVersion());

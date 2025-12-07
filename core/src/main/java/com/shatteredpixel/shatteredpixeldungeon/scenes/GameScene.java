@@ -83,6 +83,8 @@ import com.shatteredpixel.shatteredpixeldungeon.sprites.DiscardedItemSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.HeroSprite;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.ItemSprite;
 import com.shatteredpixel.shatteredpixeldungeon.tiles.CustomTilemap;
+import com.shatteredpixel.shatteredpixeldungeon.realtime.RealtimeManager;
+
 import com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTerrainTilemap;
 import com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTileSheet;
 import com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap;
@@ -469,6 +471,20 @@ public class GameScene extends PixelScene {
 		StatusPane.buffBarRowAdjusts = buffBarRowAdjusts;
 		status.setRect(insets.left, uiSize > 0 ? uiCamera.height-39-insets.bottom : screentop, uiCamera.width - insets.left - insets.right, 0 );
 		add(status);
+
+		// Debug: add a small toggle button to open the debug panel (debug builds only)
+		if (com.watabou.utils.DeviceCompat.isDebug()){
+			com.shatteredpixel.shatteredpixeldungeon.ui.IconButton btnDebug = new com.shatteredpixel.shatteredpixeldungeon.ui.IconButton(com.shatteredpixel.shatteredpixeldungeon.ui.Icons.get(com.shatteredpixel.shatteredpixeldungeon.ui.Icons.PREFS)){
+				@Override
+				protected void onClick() {
+					GameScene.show(new com.shatteredpixel.shatteredpixeldungeon.windows.WndDebug());
+				}
+			};
+			btnDebug.camera = uiCamera;
+			btnDebug.setRect(uiCamera.width - 16 - insets.right, screentop, 16, 16);
+			add(btnDebug);
+		}
+
 
 		if (uiSize < 2 && largeInsetTop != 0) {
 			SkinnedBlock bar = new SkinnedBlock(uiCamera.width, largeInsetTop, TextureCache.createSolid(0x88000000));
@@ -860,9 +876,11 @@ public class GameScene extends PixelScene {
 		@Override
 	public synchronized void update() {
 				// Realtime tick: update hero cooldowns every frame when enabled
-		if (RealtimeInput.isEnabled() && Dungeon.hero != null) {
+				if (RealtimeInput.isEnabled() && Dungeon.hero != null) {
 			float deltaTime = Gdx.graphics.getDeltaTime();
 			Dungeon.hero.updateRealtime(deltaTime);
+			// Tick enemies in realtime as well
+			RealtimeManager.update(deltaTime);
 			float targetX = Dungeon.hero.sprite.x + Dungeon.hero.sprite.width() / 2f;
 			float targetY = Dungeon.hero.sprite.y + Dungeon.hero.sprite.height() / 2f;
 			Camera.main.panTo(new PointF(targetX, targetY), 20f);

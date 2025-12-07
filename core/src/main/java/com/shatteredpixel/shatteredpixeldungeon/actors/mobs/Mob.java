@@ -63,6 +63,7 @@ import com.shatteredpixel.shatteredpixeldungeon.effects.FloatingText;
 import com.shatteredpixel.shatteredpixeldungeon.effects.Surprise;
 import com.shatteredpixel.shatteredpixeldungeon.effects.Wound;
 import com.shatteredpixel.shatteredpixeldungeon.effects.particles.ShadowParticle;
+import com.shatteredpixel.shatteredpixeldungeon.input.RealtimeInput;
 import com.shatteredpixel.shatteredpixeldungeon.items.Generator;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.artifacts.MasterThievesArmband;
@@ -219,7 +220,13 @@ public abstract class Mob extends Char {
 	@Override
 	protected boolean act() {
 		
-		super.act();
+				super.act();
+
+		// In realtime mode, mobs are updated by the render thread via RealtimeManager
+		if (RealtimeInput.isEnabled()) {
+			spend(TICK);
+			return true;
+		}
 		
 		boolean justAlerted = alerted;
 		alerted = false;
@@ -757,10 +764,97 @@ public abstract class Mob extends Char {
 		return super.defenseProc(enemy, damage);
 	}
 
-	@Override
+		@Override
 	public float speed() {
 		return super.speed() * AscensionChallenge.enemySpeedModifier(this);
 	}
+
+	// ===== Realtime AI (simple chase/attack) =====
+	protected float rtMoveCD = 0f;
+	protected float rtAttackCD = 0f;
+	protected float rtThinkCD = 0f;
+
+	public void updateRealtime(float dt) {
+		// Tick cooldowns
+		rtMoveCD = Math.max(0f, rtMoveCD - dt);
+		rtAttackCD = Math.max(0f, rtAttackCD - dt);
+		rtThinkCD = Math.max(0f, rtThinkCD - dt);
+
+		if (!isAlive() || Dungeon.hero == null || !Dungeon.hero.isAlive()) return;
+		if (paralysed > 0) return;
+
+		Char hero = Dungeon.hero;
+		int dist = Dungeon.level.distance(pos, hero.pos);
+
+		// Awareness: if close enough, chase the hero
+		boolean inAwareness = dist <= Math.max(4, viewDistance + 1);
+		if (inAwareness && state != PASSIVE && buff(Charm.class) == null) {
+			state = HUNTING;
+		}
+
+		if (state == HUNTING) {
+			// Attack when adjacent and off cooldown
+			if (dist <= 1) {
+				if (rtAttackCD <= 0f && canAttack(hero) && invisible == 0 && !isCharmedBy(hero)) {
+					// Apply combat directly without spending actor time
+					attack(hero);
+					Invisibility.dispel(this);
+					rtAttackCD = Math.max(0.1f, attackDelay());
+				}
+				return;
+			}
+
+			// Move toward the hero when off cooldown
+			if (rtMoveCD <= 0f) {
+				int next = computeStepTowards(hero.pos);
+				if (next != -1) {
+					realtimeMoveTo(next);
+					rtMoveCD = Math.max(0.08f, 0.25f / Math.max(0.1f, speed()));
+				} else {
+					// No path found; wait briefly before trying again
+					rtThinkCD = 0.25f;
+				}
+			}
+		} else if (state == WANDERING) {
+			// Optional: occasional wandering step
+			if (rtMoveCD <= 0f && rtThinkCD <= 0f) {
+				int randomTarget = ((Wandering)WANDERING).randomDestination();
+				int next = computeStepTowards(randomTarget);
+				if (next != -1) {
+					realtimeMoveTo(next);
+					rtMoveCD = Math.max(0.12f, 0.35f / Math.max(0.1f, speed()));
+				} else {
+					rtThinkCD = 0.5f;
+				}
+			}
+		}
+	}
+
+	protected int computeStepTowards(int target) {
+		int best = -1;
+		int bestDist = Integer.MAX_VALUE;
+		for (int d : PathFinder.NEIGHBOURS8) {
+			int c = pos + d;
+			if (!Dungeon.level.insideMap(c)) continue;
+			if (!Dungeon.level.passable[c]) continue;
+			if (Char.hasProp(this, Char.Property.LARGE) && !Dungeon.level.openSpace[c]) continue;
+			if (Actor.findChar(c) != null) continue; // occupied
+			int nd = Dungeon.level.distance(c, target);
+			if (nd < bestDist) {
+				bestDist = nd;
+				best = c;
+			}
+		}
+		return best;
+	}
+
+	protected void realtimeMoveTo(int cell) {
+		int from = pos;
+		pos = cell;
+		if (sprite != null) sprite.move(from, cell);
+		Dungeon.level.occupyCell(this);
+	}
+
 
 	public final boolean surprisedBy( Char enemy ){
 		return surprisedBy( enemy, true);

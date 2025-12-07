@@ -104,22 +104,28 @@ public class CellSelector extends ScrollArea {
             //Prioritizes a sprite if it and a tile overlap, so long as that sprite isn't more than 4 pixels into another tile.
             //The extra check prevents large sprites from blocking the player from clicking adjacent tiles
 
-            //hero first
-            if (Dungeon.hero.sprite != null && Dungeon.hero.sprite.overlapsPoint( p.x, p.y )){
-                PointF c = DungeonTilemap.tileCenterToWorld(Dungeon.hero.pos);
-                if (Math.abs(p.x - c.x) <= 12 && Math.abs(p.y - c.y) <= 12) {
-                    select(Dungeon.hero.pos, event.button);
-                    return;
+                        //hero first (use hitbox for tighter, art-accurate selection)
+            if (Dungeon.hero.sprite != null) {
+                com.watabou.utils.RectF hb = Dungeon.hero.sprite.getHitbox();
+                if (p.x >= hb.left && p.x < hb.right && p.y >= hb.top && p.y < hb.bottom) {
+                    PointF c = DungeonTilemap.tileCenterToWorld(Dungeon.hero.pos);
+                    if (Math.abs(p.x - c.x) <= 12 && Math.abs(p.y - c.y) <= 12) {
+                        select(Dungeon.hero.pos, event.button);
+                        return;
+                    }
                 }
             }
 
-            //then mobs
+            //then mobs (use hitbox for tighter selection)
             for (Char mob : Dungeon.level.mobs.toArray(new Mob[0])){
-                if (mob.sprite != null && mob.sprite.overlapsPoint( p.x, p.y )){
-                    PointF c = DungeonTilemap.tileCenterToWorld(mob.pos);
-                    if (Math.abs(p.x - c.x) <= 12 && Math.abs(p.y - c.y) <= 12) {
-                        select(mob.pos, event.button);
-                        return;
+                if (mob.sprite != null) {
+                    com.watabou.utils.RectF hb = mob.sprite.getHitbox();
+                    if (p.x >= hb.left && p.x < hb.right && p.y >= hb.top && p.y < hb.bottom) {
+                        PointF c = DungeonTilemap.tileCenterToWorld(mob.pos);
+                        if (Math.abs(p.x - c.x) <= 12 && Math.abs(p.y - c.y) <= 12) {
+                            select(mob.pos, event.button);
+                            return;
+                        }
                     }
                 }
             }

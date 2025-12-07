@@ -4,12 +4,13 @@ apply plugin: 'java-library'
 java.sourceCompatibility = java.targetCompatibility = appJavaCompatibility
 
 dependencies {
-    // Use prebuilt SPD-classes jar instead of a Gradle subproject
-    implementation files(rootProject.file("SPD-classes/build/libs/SPD-classes-${appVersionName}.jar"))
+    // Depend on SPD-classes project so Gradle knows to build it before compiling this module
+    implementation project(':SPD-classes')
     // Required for Gdx Net/XmlReader used by ShatteredNews
     implementation "com.badlogicgames.gdx:gdx:$gdxVersion"
 
     api project(':services')
 }
+
 
 

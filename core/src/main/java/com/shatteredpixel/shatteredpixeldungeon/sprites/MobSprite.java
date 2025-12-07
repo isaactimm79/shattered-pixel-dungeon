@@ -33,6 +33,12 @@ public class MobSprite extends CharSprite {
 
 	private static final float FADE_TIME	= 3f;
 	private static final float FALL_TIME	= 1f;
+
+	public MobSprite() {
+		super();
+		// Default mobs use a tight hitbox around opaque sprite pixels with slight padding
+		setHitboxTight(1, 0.01f);
+	}
 	
 	@Override
 	public void update() {
