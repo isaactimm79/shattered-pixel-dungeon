@@ -849,6 +849,36 @@ public abstract class Mob extends Char {
 	}
 
 	protected void realtimeMoveTo(int cell) {
+		// Collision check: don't move into hero's cell or other character's cell
+		Char occupant = Actor.findChar(cell);
+		if (occupant != null && occupant != this) {
+			// Cell is occupied, abort move
+			return;
+		}
+
+		// Additional collision check for hero's sub-tile position
+		// Hero uses exactX/exactY for smooth movement, so check actual distance
+		if (Dungeon.hero != null && Dungeon.hero.isAlive()) {
+			int w = Dungeon.level.width();
+			float targetX = cell % w;
+			float targetY = cell / w;
+
+			// Get hero's actual position (exactX/exactY are public fields)
+			float heroX = Dungeon.hero.exactX;
+			float heroY = Dungeon.hero.exactY;
+
+			// Check distance with collision radius (0.6 tiles is a safe minimum distance)
+			// This accounts for COLLISION_RADIUS (0.3) + MOB_COLLISION_RADIUS (0.28) ≈ 0.58
+			float dx = targetX - heroX;
+			float dy = targetY - heroY;
+			float distSq = dx * dx + dy * dy;
+
+			// Don't move if we'd be too close to the hero (0.6^2 = 0.36)
+			if (distSq < 0.36f) {
+				return;
+			}
+		}
+
 		int from = pos;
 		pos = cell;
 		if (sprite != null) sprite.move(from, cell);
