@@ -2917,11 +2917,44 @@ public class Hero extends Char {
 	}
 
 		private boolean isPassableCenter(float tx, float ty) {
+		// Adaptive collision radius: use smaller radius when stuck
+		// This allows squeezing through tight spaces between multiple enemies
+		float checkRadius = COLLISION_RADIUS;
+
+		// Detect if stuck (very close to any enemy)
+		if (isHeroStuck()) {
+			// Use 40% of normal collision radius when stuck (allows tight squeezes)
+			checkRadius = COLLISION_RADIUS * 0.4f;
+		}
+
 		// collision radius check at four sample points around the target center
-		return isTilePassableAt(tx - COLLISION_RADIUS, ty)
-			&& isTilePassableAt(tx + COLLISION_RADIUS, ty)
-			&& isTilePassableAt(tx, ty - COLLISION_RADIUS)
-			&& isTilePassableAt(tx, ty + COLLISION_RADIUS);
+		return isTilePassableAt(tx - checkRadius, ty)
+			&& isTilePassableAt(tx + checkRadius, ty)
+			&& isTilePassableAt(tx, ty - checkRadius)
+			&& isTilePassableAt(tx, ty + checkRadius);
+	}
+
+	private boolean isHeroStuck() {
+		// Check if hero is very close to any character
+		if (Dungeon.level == null) return false;
+
+		int w = Dungeon.level.width();
+		float rr = (COLLISION_RADIUS + MOB_COLLISION_RADIUS);
+		float stuckThreshold = (rr * 0.7f) * (rr * 0.7f); // 70% of collision radius
+
+		for (Char c : Actor.chars()) {
+			if (c == this) continue;
+			float cx = (c.pos % w);
+			float cy = (c.pos / w);
+			float dx = exactX - cx;
+			float dy = exactY - cy;
+			float distSq = dx*dx + dy*dy;
+
+			if (distSq < stuckThreshold) {
+				return true; // Stuck near this character
+			}
+		}
+		return false; // Not stuck
 	}
 
 		private boolean isTilePassableAt(float sx, float sy) {
@@ -3129,10 +3162,44 @@ public class Hero extends Char {
 				}
 			}
 		}
+
+		// Emergency force-move: if completely stuck and couldn't move with any of the above
+		// attempts, force a tiny move in the desired direction (ignoring collision, only checking terrain)
+		if (!moved && isHeroStuck() && (stepX != 0 || stepY != 0)) {
+			// Use very small step (10% of normal) to gradually escape
+			float emergencyX = exactX + stepX * 0.1f;
+			float emergencyY = exactY + stepY * 0.1f;
+
+			// Only check terrain (not character collision)
+			if (isTerrainPassable(emergencyX, emergencyY)) {
+				exactX = emergencyX;
+				exactY = emergencyY;
+				moved = true;
+			}
+		}
+
 		if (moved) {
 			// Clear pathing related flags used by turn-based move
 			walkingToVisibleTrapInFog = false;
 		}
+	}
+
+	private boolean isTerrainPassable(float tx, float ty) {
+		// Check only terrain (no character collision)
+		if (Dungeon.level == null) return false;
+
+		int w = Dungeon.level.width();
+		int h = Dungeon.level.height();
+		int nx = (int)(tx + 0.5f);
+		int ny = (int)(ty + 0.5f);
+
+		if (nx < 0 || ny < 0 || nx >= w || ny >= h) return false;
+
+		int cell = nx + ny * w;
+		if (!(Dungeon.level.passable[cell] || Dungeon.level.avoid[cell])) return false;
+		if (Dungeon.level.pit[cell] && !Dungeon.level.solid[cell]) return false;
+
+		return true;
 	}
 
 
