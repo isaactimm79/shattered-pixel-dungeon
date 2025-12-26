@@ -65,19 +65,31 @@ public class RealtimeController {
 	public static void performInteraction(Hero hero) {
 		if (!RealtimeInput.isEnabled() || Dungeon.level == null) return;
 
+		GLog.i("[DEBUG] Spacebar pressed - performInteraction called");
+
 		// A) Try item pickup first
 		hero.waitOrPickup = true;
-		if (hero.pickup(null)) return;
+		boolean pickedUp = hero.pickup(null);
+		GLog.i("[DEBUG] Item pickup attempt: %s", pickedUp ? "SUCCESS (returning early)" : "FAILED");
+		if (pickedUp) return;
 
 		// B) Try interacting with containers
 		Heap target = scanForTarget(hero);
-		if (target != null && tryInteractWithHeap(hero, target)) return;
+		GLog.i("[DEBUG] Container scan result: %s", target != null ? "Found heap at " + target.pos : "No containers found");
+		if (target != null) {
+			boolean interacted = tryInteractWithHeap(hero, target);
+			GLog.i("[DEBUG] Container interaction: %s", interacted ? "SUCCESS" : "FAILED");
+			if (interacted) return;
+		}
 
 		// C) Try unlocking adjacent doors
-		if (tryUnlockAdjacentDoors(hero)) return;
+		boolean doorUnlocked = tryUnlockAdjacentDoors(hero);
+		GLog.i("[DEBUG] Door unlock: %s", doorUnlocked ? "SUCCESS" : "FAILED");
+		if (doorUnlocked) return;
 
 		// D) Try level transitions (stairs/portals)
-		tryLevelTransition(hero);
+		boolean transitioned = tryLevelTransition(hero);
+		GLog.i("[DEBUG] Level transition: %s", transitioned ? "SUCCESS" : "FAILED");
 	}
 
 	/**
@@ -176,10 +188,25 @@ public class RealtimeController {
 		float bestDistSq = PICKUP_RANGE_SQ;
 		int w = Dungeon.level.width();
 
+		int totalHeaps = 0;
+		int skippedRegular = 0;
+		int skippedFOV = 0;
+		int scannedContainers = 0;
+
 		for (Heap h : Dungeon.level.heaps.valueList()) {
 			if (h == null) continue;
-			if (h.type == Heap.Type.HEAP || h.type == Heap.Type.FOR_SALE) continue;
-			if (!Dungeon.level.heroFOV[h.pos]) continue;
+			totalHeaps++;
+
+			if (h.type == Heap.Type.HEAP || h.type == Heap.Type.FOR_SALE) {
+				skippedRegular++;
+				continue;
+			}
+			if (!Dungeon.level.heroFOV[h.pos]) {
+				skippedFOV++;
+				continue;
+			}
+
+			scannedContainers++;
 
 			// Calculate distance squared (zero allocation)
 			int hx = h.pos % w;
@@ -188,11 +215,17 @@ public class RealtimeController {
 			float dy = hy - hero.exactY;
 			float distSq = dx * dx + dy * dy;
 
+			GLog.i("[DEBUG] Found container type=%s at pos=%d, dist²=%.2f (max=%.2f)",
+				h.type.name(), h.pos, distSq, PICKUP_RANGE_SQ);
+
 			if (distSq <= bestDistSq) {
 				best = h;
 				bestDistSq = distSq;
 			}
 		}
+
+		GLog.i("[DEBUG] Scan summary: %d total heaps, %d regular (skipped), %d out of FOV (skipped), %d containers scanned",
+			totalHeaps, skippedRegular, skippedFOV, scannedContainers);
 
 		return best;
 	}
@@ -212,10 +245,16 @@ public class RealtimeController {
 		float dy = hy - hero.exactY;
 		float distSq = dx * dx + dy * dy;
 
-		if (distSq > INTERACTION_RANGE_SQ) return false;
+		GLog.i("[DEBUG] tryInteractWithHeap: type=%s, dist²=%.2f, max=%.2f", heap.type.name(), distSq, INTERACTION_RANGE_SQ);
+
+		if (distSq > INTERACTION_RANGE_SQ) {
+			GLog.i("[DEBUG] Container TOO FAR (%.2f > %.2f)", distSq, INTERACTION_RANGE_SQ);
+			return false;
+		}
 
 		// Snap hero position for engine compatibility
 		int savedPos = hero.pos;
+		GLog.i("[DEBUG] Snapping hero from pos %d to heap pos %d", savedPos, heap.pos);
 		try {
 			hero.pos = heap.pos;
 			if (hero.sprite != null) {
@@ -223,10 +262,12 @@ public class RealtimeController {
 				hero.sprite.idle();
 			}
 
+			GLog.i("[DEBUG] Calling openHeap()");
 			openHeap(hero, heap);
 			return true;
 		} finally {
 			hero.pos = savedPos;
+			GLog.i("[DEBUG] Restored hero pos to %d", savedPos);
 		}
 	}
 
@@ -234,9 +275,13 @@ public class RealtimeController {
 	 * Opens a heap, handling locked containers with key checks.
 	 */
 	private static void openHeap(Hero hero, Heap heap) {
+		GLog.i("[DEBUG] openHeap called for type=%s at pos=%d", heap.type.name(), heap.pos);
+
 		switch (heap.type) {
 			case LOCKED_CHEST:
+				GLog.i("[DEBUG] Attempting to unlock LOCKED_CHEST");
 				if (tryUnlockChest(hero, heap, new GoldenKey(Dungeon.depth))) {
+					GLog.i("[DEBUG] Key found, calling heap.open()");
 					heap.open(hero);
 					GLog.i("Manual Unlock Success.");
 				} else {
@@ -245,7 +290,9 @@ public class RealtimeController {
 				break;
 
 			case CRYSTAL_CHEST:
+				GLog.i("[DEBUG] Attempting to unlock CRYSTAL_CHEST");
 				if (tryUnlockChest(hero, heap, new CrystalKey(Dungeon.depth))) {
+					GLog.i("[DEBUG] Key found, calling heap.open()");
 					heap.open(hero);
 					GLog.i("Manual Unlock Success.");
 				} else {
@@ -257,11 +304,13 @@ public class RealtimeController {
 			case TOMB:
 			case SKELETON:
 			case REMAINS:
+				GLog.i("[DEBUG] Opening unlocked container type=%s, calling heap.open()", heap.type.name());
 				heap.open(hero);
 				GLog.i("Forced container open at %d", heap.pos);
 				break;
 
 			default:
+				GLog.i("[DEBUG] Default case, calling heap.open()");
 				heap.open(hero);
 				break;
 		}

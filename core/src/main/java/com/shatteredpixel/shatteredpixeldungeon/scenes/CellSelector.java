@@ -330,6 +330,7 @@ public class CellSelector extends ScrollArea {
                     handledRealtime = true;
                 } else if (action == SPDAction.WAIT_OR_PICKUP && event.pressed) {
                     // Trigger interaction on spacebar press
+                    com.shatteredpixel.shatteredpixeldungeon.utils.GLog.i("[DEBUG] Spacebar detected in CellSelector - calling onActionPressed()");
                     RealtimeInput.onActionPressed();
                     return true;
                 }
