@@ -1383,8 +1383,58 @@ public abstract class Char extends Actor {
 		float dist = (float)Math.sqrt(distSq);
 		float moveAmount = Math.min(moveDistance, dist); // Don't overshoot
 
-		exactX += (dx / dist) * moveAmount;
-		exactY += (dy / dist) * moveAmount;
+		// Calculate next position
+		float nextX = exactX + (dx / dist) * moveAmount;
+		float nextY = exactY + (dy / dist) * moveAmount;
+
+		// Collision detection - check terrain and characters
+		if (Dungeon.level != null) {
+			// Check terrain passability at next position
+			int nextCell = (int)nextX + (int)nextY * Dungeon.level.width();
+
+			// Check if terrain is passable
+			boolean terrainBlocked = false;
+			if (nextCell >= 0 && nextCell < Dungeon.level.length()) {
+				terrainBlocked = !Dungeon.level.passable[nextCell];
+
+				// Additional check for large characters
+				if (!terrainBlocked && hasProp(this, Property.LARGE)) {
+					terrainBlocked = !Dungeon.level.openSpace[nextCell];
+				}
+			}
+
+			// Check collision with other characters
+			boolean charBlocked = false;
+			for (Char other : Actor.chars()) {
+				if (other == this || !other.isAlive()) continue;
+
+				// Calculate distance to other character
+				float odx = nextX - other.exactX;
+				float ody = nextY - other.exactY;
+				float odistSq = odx*odx + ody*ody;
+
+				// Use collision radius (0.5 is a safe distance to prevent overlap)
+				if (odistSq < 0.25f) { // 0.5 * 0.5 = 0.25
+					charBlocked = true;
+					break;
+				}
+			}
+
+			// If blocked, stop movement at current position
+			if (terrainBlocked || charBlocked) {
+				isMovingSmooth = false;
+
+				// Return to idle animation
+				if (sprite != null && sprite.idle != null) {
+					sprite.play(sprite.idle);
+				}
+				return;
+			}
+		}
+
+		// Apply movement (collision checks passed)
+		exactX = nextX;
+		exactY = nextY;
 
 		// Update sprite position for smooth rendering
 		if (sprite != null) {
