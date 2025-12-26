@@ -1387,14 +1387,47 @@ public abstract class Char extends Actor {
 		float dist = (float)Math.sqrt(distSq);
 		float moveAmount = Math.min(moveDistance, dist); // Don't overshoot
 
-		// Apply movement - pathfinding already validated the destination
-		// This is purely visual interpolation between old and new grid positions
-		exactX += (dx / dist) * moveAmount;
-		exactY += (dy / dist) * moveAmount;
+		// Calculate next position
+		float nextX = exactX + (dx / dist) * moveAmount;
+		float nextY = exactY + (dy / dist) * moveAmount;
 
-		// Update sprite position for smooth rendering
-		if (sprite != null) {
-			sprite.placeExact(exactX, exactY);
+		// Collision detection during movement - check if next position would overlap
+		boolean blocked = false;
+		if (!(this instanceof com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero) && Dungeon.level != null) {
+			for (Char other : Actor.chars()) {
+				if (other == this || !other.isAlive()) continue;
+
+				// Calculate distance to other character at next position
+				float odx = nextX - other.exactX;
+				float ody = nextY - other.exactY;
+				float odistSq = odx * odx + ody * ody;
+
+				// Minimum distance: 0.5 tiles for enemies, 0.6 for hero
+				float minDist = (other == Dungeon.hero) ? 0.6f : 0.5f;
+
+				if (odistSq < minDist * minDist) {
+					// Would collide - stop movement
+					blocked = true;
+					isMovingSmooth = false;
+
+					// Return to idle animation
+					if (sprite != null && sprite.idle != null) {
+						sprite.play(sprite.idle);
+					}
+					break;
+				}
+			}
+		}
+
+		// Apply movement if not blocked
+		if (!blocked) {
+			exactX = nextX;
+			exactY = nextY;
+
+			// Update sprite position for smooth rendering
+			if (sprite != null) {
+				sprite.placeExact(exactX, exactY);
+			}
 		}
 	}
 
