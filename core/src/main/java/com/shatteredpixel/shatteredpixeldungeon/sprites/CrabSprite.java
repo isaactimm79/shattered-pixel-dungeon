@@ -46,6 +46,11 @@ public class CrabSprite extends MobSprite {
 		die.frames( frames, 10, 11, 12, 13 );
 
 		play( idle );
+
+		// Custom hitbox: Crab sprite is 16x16 pixels
+		// Use 11x10 hitbox (wider, flatter for crab shape) centered for refined collision
+		// Offset calculation: (16-11)/2 = 2.5, (16-10)/2 = 3
+		setHitboxCustom(11f, 10f, 2.5f, 3f);
 	}
 
 	@Override

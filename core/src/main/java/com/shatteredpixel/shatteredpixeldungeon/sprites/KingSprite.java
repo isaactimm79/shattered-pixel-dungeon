@@ -44,7 +44,12 @@ public class KingSprite extends MobSprite {
 		
 		die = new Animation( 8, false );
 		die.frames( frames, 12, 13, 14, 15 );
-		
+
 		play( idle );
+
+		// Custom hitbox: King sprite is 16x16 pixels (dwarf king boss)
+		// Use 13x13 hitbox (80% of sprite) centered for refined collision
+		// Offset calculation: (16-13)/2 = 1.5
+		setHitboxCustom(13f, 13f, 1.5f, 1.5f);
 	}
 }

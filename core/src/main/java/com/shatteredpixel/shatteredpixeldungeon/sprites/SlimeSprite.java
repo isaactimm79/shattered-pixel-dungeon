@@ -44,8 +44,13 @@ public class SlimeSprite extends MobSprite {
 		
 		die = new Animation( 10, false );
 		die.frames( frames, 0, 5, 6, 7 );
-		
+
 		play(idle);
+
+		// Custom hitbox: Slime sprite is 14x12 pixels
+		// Use 10x9 hitbox (70% of sprite) centered for refined collision
+		// Offset calculation: (14-10)/2 = 2, (12-9)/2 = 1.5
+		setHitboxCustom(10f, 9f, 2f, 1.5f);
 	}
 
 	@Override

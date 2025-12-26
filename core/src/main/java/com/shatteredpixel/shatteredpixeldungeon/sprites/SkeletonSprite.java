@@ -46,8 +46,13 @@ public class SkeletonSprite extends MobSprite {
 		
 		die = new Animation( 12, false );
 		die.frames( frames, 10, 11, 12, 13 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Skeleton sprite is 12x15 pixels
+		// Use 10x12 hitbox (80% of sprite) centered for refined collision
+		// Offset calculation: (12-10)/2 = 1, (15-12)/2 = 1.5
+		setHitboxCustom(10f, 12f, 1f, 1.5f);
 	}
 	
 	@Override

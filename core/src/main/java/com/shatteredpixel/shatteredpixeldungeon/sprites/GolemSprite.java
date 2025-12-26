@@ -55,8 +55,13 @@ public class GolemSprite extends MobSprite {
 		
 		die = new Animation( 15, false );
 		die.frames( frames, 9, 10, 11, 12, 13 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Golem sprite is 17x19 pixels (large)
+		// Use 14x16 hitbox (80-85% of sprite) centered for refined collision
+		// Offset calculation: (17-14)/2 = 1.5, (19-16)/2 = 1.5
+		setHitboxCustom(14f, 16f, 1.5f, 1.5f);
 	}
 
 	@Override

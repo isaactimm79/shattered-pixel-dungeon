@@ -48,8 +48,13 @@ public class YogSprite extends MobSprite {
 		
 		die = new Animation( 10, false );
 		die.frames( frames, 0, 7, 8, 9 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Yog sprite is 20x19 pixels (final boss eye)
+		// Use 16x15 hitbox (80% of sprite) centered for refined collision
+		// Offset calculation: (20-16)/2 = 2, (19-15)/2 = 2
+		setHitboxCustom(16f, 15f, 2f, 2f);
 	}
 
 	@Override

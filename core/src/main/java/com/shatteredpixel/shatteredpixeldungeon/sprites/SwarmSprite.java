@@ -44,8 +44,13 @@ public class SwarmSprite extends MobSprite {
 		
 		die = new Animation( 15, false );
 		die.frames( frames, 10, 11, 12, 13, 14 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Swarm sprite is 16x16 pixels
+		// Use 8x8 hitbox (50% of sprite) centered for refined collision
+		// Offset calculation: (16-8)/2 = 4
+		setHitboxCustom(8f, 8f, 4f, 4f);
 	}
 	
 	@Override

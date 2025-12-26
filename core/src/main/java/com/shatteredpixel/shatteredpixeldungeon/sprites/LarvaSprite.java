@@ -45,8 +45,13 @@ public class LarvaSprite extends MobSprite {
 		
 		die = new Animation( 10, false );
 		die.frames( frames, 8 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Larva sprite is 12x8 pixels (very small!)
+		// Use 6x5 hitbox (50-60% of sprite) centered for refined collision
+		// Offset calculation: (12-6)/2 = 3, (8-5)/2 = 1.5
+		setHitboxCustom(6f, 5f, 3f, 1.5f);
 	}
 	
 	@Override
