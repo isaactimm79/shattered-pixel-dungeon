@@ -790,6 +790,12 @@ public abstract class Mob extends Char {
 	protected int avoidPos = -1;  // Position to avoid (recently oscillated back from)
 	protected float avoidTime = 0f;  // How long to avoid the position
 
+	// Real-time A* pathfinding - commit to paths around obstacles
+	protected PathFinder.Path rtPath = null;  // Current path being followed
+	protected int rtPathTarget = -1;  // Target position the path leads to
+	protected float rtPathAge = 0f;  // How old the current path is
+	protected static final float RT_PATH_REFRESH = 1.0f;  // Refresh path every 1 second max
+
 	public void updateRealtime(float dt) {
 		// Update smooth movement interpolation first (moves sprite toward target)
 		updateMovement(dt);
@@ -799,6 +805,7 @@ public abstract class Mob extends Char {
 		rtAttackCD = Math.max(0f, rtAttackCD - dt);
 		rtThinkCD = Math.max(0f, rtThinkCD - dt);
 		avoidTime = Math.max(0f, avoidTime - dt);
+		rtPathAge += dt;
 
 		if (!isAlive() || Dungeon.hero == null || !Dungeon.hero.isAlive()) return;
 		if (paralysed > 0) return;
@@ -871,9 +878,10 @@ public abstract class Mob extends Char {
 			if (rtMoveCD <= 0f && !isMovingSmooth && targetPos != -1) {
 				int next = -1;
 
-				// If stuck, use unstuck behavior
+				// If stuck, use unstuck behavior and clear any cached path
 				if (stuckAttempts > 0) {
 					next = tryUnstuckMovement(targetPos);
+					rtPath = null;  // Clear path when stuck
 				}
 
 				// Normal pathfinding if not stuck or unstuck failed
@@ -881,7 +889,15 @@ public abstract class Mob extends Char {
 					// Try direct movement first (more natural for real-time)
 					next = tryDirectMovement(targetPos);
 
-					// Fall back to smart pathfinding if direct path blocked
+					if (next != -1) {
+						// Direct movement worked - clear stored path since we might not need it
+						rtPath = null;
+					} else {
+						// Direct path blocked - use A* to find path around obstacles
+						next = getRealtimePathStep(targetPos);
+					}
+
+					// Fall back to local smart pathfinding
 					if (next == -1) {
 						next = computeSmartPath(targetPos);
 					}
@@ -1121,6 +1137,84 @@ public abstract class Mob extends Char {
 			}
 		}
 		return best;
+	}
+
+	/**
+	 * Real-time A* pathfinding - computes or follows a stored path around obstacles.
+	 * Uses proper A* to find paths around other enemies instead of oscillating.
+	 *
+	 * @param target Target position to reach
+	 * @return Next cell to move to, or -1 if no path found
+	 */
+	protected int getRealtimePathStep(int target) {
+		if (Dungeon.level == null || fieldOfView == null) return -1;
+
+		// Check if we need a new path
+		boolean needNewPath = false;
+
+		if (rtPath == null || rtPath.isEmpty()) {
+			needNewPath = true;
+		} else if (rtPathTarget != target) {
+			// Target changed significantly - recompute
+			needNewPath = true;
+		} else if (rtPathAge > RT_PATH_REFRESH) {
+			// Path is stale - recompute
+			needNewPath = true;
+		} else {
+			// Check if path is still valid (next step is adjacent and passable)
+			int nextStep = rtPath.getFirst();
+			if (!Dungeon.level.adjacent(pos, nextStep)) {
+				needNewPath = true;
+			} else if (!isCellPassable(nextStep)) {
+				// Path is blocked - try to find alternate next step
+				needNewPath = true;
+				// But first, try to find a valid step that connects to the rest of the path
+				if (rtPath.size() > 1) {
+					int afterNext = rtPath.get(1);
+					for (int d : PathFinder.NEIGHBOURS8) {
+						int alt = pos + d;
+						if (isCellPassable(alt) && Dungeon.level.adjacent(alt, afterNext)) {
+							// Found alternate route - use it
+							rtPath.set(0, alt);
+							needNewPath = false;
+							break;
+						}
+					}
+				}
+			}
+		}
+
+		// Compute new path if needed
+		if (needNewPath) {
+			// Use A* with characters as obstacles - this will path AROUND other enemies
+			boolean[] passable = Dungeon.findPassable(this, Dungeon.level.passable, fieldOfView, true);
+			rtPath = PathFinder.findAStar(pos, target, passable);
+			rtPathTarget = target;
+			rtPathAge = 0f;
+
+			// If no path around enemies, try ignoring them (they might move)
+			if (rtPath == null) {
+				passable = Dungeon.findPassable(this, Dungeon.level.passable, fieldOfView, false);
+				PathFinder.Path ignorePath = PathFinder.findAStar(pos, target, passable);
+				if (ignorePath != null && !ignorePath.isEmpty()) {
+					// Found path ignoring enemies - check if first step is clear
+					int firstStep = ignorePath.getFirst();
+					if (isCellPassable(firstStep)) {
+						rtPath = ignorePath;
+					}
+				}
+			}
+		}
+
+		// Get next step from path
+		if (rtPath != null && !rtPath.isEmpty()) {
+			int nextStep = rtPath.removeFirst();
+			if (isCellPassable(nextStep)) {
+				return nextStep;
+			}
+		}
+
+		return -1;
 	}
 
 	/**
