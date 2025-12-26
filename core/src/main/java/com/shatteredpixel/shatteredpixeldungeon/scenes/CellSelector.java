@@ -328,6 +328,10 @@ public class CellSelector extends ScrollArea {
                 } else if (action == SPDAction.S) {
                     RealtimeInput.moveDown = event.pressed;
                     handledRealtime = true;
+                } else if (action == SPDAction.WAIT_OR_PICKUP && event.pressed) {
+                    // Trigger interaction on spacebar press
+                    RealtimeInput.onActionPressed();
+                    return true;
                 }
 
                 // Also consume diagonals and wait/rest so turn-based logic doesn't trigger while in realtime
