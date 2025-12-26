@@ -1020,7 +1020,7 @@ public abstract class Mob extends Char {
 	 * Checks if a cell is passable for this mob.
 	 * Flying enemies can move over pits/chasms (avoid[] cells).
 	 */
-	protected boolean isCellPassable(int cell) {
+		protected boolean isCellPassable(int cell) {
 		if (!Dungeon.level.insideMap(cell)) return false;
 
 		// Flying enemies can move into avoid[] cells (pits/chasms)
@@ -1034,8 +1034,22 @@ public abstract class Mob extends Char {
 
 		if (Char.hasProp(this, Char.Property.LARGE) && !Dungeon.level.openSpace[cell]) return false;
 		if (Actor.findChar(cell) != null) return false;
+
+		// Prevent diagonal corner cutting: both adjacent orthogonals to the diagonal must be traversable
+		int w = Dungeon.level.width();
+		int dx = (cell % w) - (pos % w);
+		int dy = (cell / w) - (pos / w);
+		if (dx != 0 && dy != 0) {
+			int ortho1 = pos + Integer.signum(dx);
+			int ortho2 = pos + Integer.signum(dy) * w;
+			boolean ok1 = Dungeon.level.passable[ortho1] || (flying && Dungeon.level.avoid[ortho1]);
+			boolean ok2 = Dungeon.level.passable[ortho2] || (flying && Dungeon.level.avoid[ortho2]);
+			if (!ok1 || !ok2) return false;
+		}
+
 		return true;
 	}
+
 
 	protected int computeStepTowards(int target) {
 		int best = -1;

@@ -36,8 +36,10 @@ public class PathFinder {
 	private static int size = 0;
 	private static int width = 0;
 
-	private static int[] dir;
+		private static int[] dir;
 	private static int[] dirLR;
+	private static boolean[] diagLR;
+
 
 	//performance-light shortcuts for some common pathfinder cases
 	//they are in array-access order for increased memory performance
@@ -65,14 +67,33 @@ public class PathFinder {
 
 		dir = new int[]{-1, +1, -width, +width, -width-1, -width+1, +width-1, +width+1};
 		dirLR = new int[]{-1-width, -1, -1+width, -width, +width, +1-width, +1, +1+width};
+		// indices 0,2,5,7 are diagonals in dirLR
+		diagLR = new boolean[]{true, false, true, false, false, true, false, true};
+
 
 		NEIGHBOURS4 = new int[]{-width, -1, +1, +width};
 		NEIGHBOURS8 = new int[]{-width-1, -width, -width+1, -1, +1, +width-1, +width, +width+1};
 		NEIGHBOURS9 = new int[]{-width-1, -width, -width+1, -1, 0, +1, +width-1, +width, +width+1};
 
-		CIRCLE4 = new int[]{-width, +1, +width, -1};
+				CIRCLE4 = new int[]{-width, +1, +width, -1};
 		CIRCLE8 = new int[]{-width-1, -width, -width+1, +1, +width+1, +width, +width-1, -1};
 	}
+
+	// Prevents diagonal corner-cutting: for a diagonal step, both adjacent orthogonal cells must be passable
+	private static boolean diagonalClear(int step, int n, boolean[] passable) {
+		int off = n - step;
+		if (off == -width - 1) {
+			return passable[step-1] && passable[step-width];
+		} else if (off == -width + 1) {
+			return passable[step+1] && passable[step-width];
+		} else if (off == +width - 1) {
+			return passable[step-1] && passable[step+width];
+		} else if (off == +width + 1) {
+			return passable[step+1] && passable[step+width];
+		}
+		return true;
+	}
+
 
 	public static Path find( int from, int to, boolean[] passable ) {
 
@@ -233,13 +254,20 @@ public class PathFinder {
 			for (int i = start; i < dirLR.length - end; i++) {
 
 				int n = step + dirLR[i];
-				if (n == from || (n >= 0 && n < size && passable[n] && (distance[n] > nextDistance))) {
-					// Add to queue
-					queue[tail++] = n;
-					distance[n] = nextDistance;
+				if (n >= 0 && n < size && passable[n]) {
+					// prevent diagonal corner cutting
+					if (diagLR[i] && !diagonalClear(step, n, passable)) {
+						continue;
+					}
+					if (n == from || distance[n] > nextDistance) {
+						// Add to queue
+						queue[tail++] = n;
+						distance[n] = nextDistance;
+					}
 				}
 					
 			}
+
 		}
 		
 		return pathFound;
@@ -271,13 +299,19 @@ public class PathFinder {
 			for (int i = start; i < dirLR.length - end; i++) {
 
 				int n = step + dirLR[i];
-				if (n >= 0 && n < size && passable[n] && (distance[n] > nextDistance)) {
-					// Add to queue
-					queue[tail++] = n;
-					distance[n] = nextDistance;
+				if (n >= 0 && n < size && passable[n]) {
+					if (diagLR[i] && !diagonalClear(step, n, passable)) {
+						continue;
+					}
+					if (distance[n] > nextDistance) {
+						// Add to queue
+						queue[tail++] = n;
+						distance[n] = nextDistance;
+					}
 				}
 					
 			}
+
 		}
 	}
 	
@@ -317,13 +351,20 @@ public class PathFinder {
 			for (int i = start; i < dirLR.length - end; i++) {
 
 				int n = step + dirLR[i];
-				if (n == from || (n >= 0 && n < size && passable[n] && (distance[n] > nextDistance))) {
-					// Add to queue
-					queue[tail++] = n;
-					distance[n] = nextDistance;
+				if (n >= 0 && n < size && passable[n]) {
+					// prevent diagonal corner cutting
+					if (diagLR[i] && !diagonalClear(step, n, passable)) {
+						continue;
+					}
+					if (n == from || distance[n] > nextDistance) {
+						// Add to queue
+						queue[tail++] = n;
+						distance[n] = nextDistance;
+					}
 				}
 					
 			}
+
 		}
 		
 		return pathFound;
@@ -367,13 +408,19 @@ public class PathFinder {
 			for (int i = start; i < dirLR.length - end; i++) {
 
 				int n = step + dirLR[i];
-				if (n >= 0 && n < size && passable[n] && distance[n] > nextDistance) {
-					// Add to queue
-					queue[tail++] = n;
-					distance[n] = nextDistance;
+				if (n >= 0 && n < size && passable[n]) {
+					if (diagLR[i] && !diagonalClear(step, n, passable)) {
+						continue;
+					}
+					if (distance[n] > nextDistance) {
+						// Add to queue
+						queue[tail++] = n;
+						distance[n] = nextDistance;
+					}
 				}
 					
 			}
+
 		}
 		
 		return dist;
@@ -401,13 +448,19 @@ public class PathFinder {
 			for (int i = start; i < dirLR.length - end; i++) {
 
 				int n = step + dirLR[i];
-				if (n >= 0 && n < size && passable[n] && (distance[n] > nextDistance)) {
-					// Add to queue
-					queue[tail++] = n;
-					distance[n] = nextDistance;
+				if (n >= 0 && n < size && passable[n]) {
+					if (diagLR[i] && !diagonalClear(step, n, passable)) {
+						continue;
+					}
+					if (distance[n] > nextDistance) {
+						// Add to queue
+						queue[tail++] = n;
+						distance[n] = nextDistance;
+					}
 				}
 					
 			}
+
 		}
 	}
 	
