@@ -779,6 +779,14 @@ public abstract class Mob extends Char {
 	protected float timeSinceLastSeen = 0f;  // Time since enemy saw hero
 	protected static final float MEMORY_DURATION = 3f;  // Remember hero for 3 seconds after losing sight
 
+	// AI improvement: Stuck detection and prevention
+	protected int lastPos = -1;  // Track last position to detect if we're stuck
+	protected float timeAtPosition = 0f;  // How long we've been at this position
+	protected static final float STUCK_THRESHOLD = 1.5f;  // Consider stuck after 1.5 seconds
+	protected int stuckAttempts = 0;  // Count failed move attempts
+	protected int avoidPos = -1;  // Position to avoid (recently oscillated back from)
+	protected float avoidTime = 0f;  // How long to avoid the position
+
 	public void updateRealtime(float dt) {
 		// Update smooth movement interpolation first (moves sprite toward target)
 		updateMovement(dt);
@@ -787,9 +795,28 @@ public abstract class Mob extends Char {
 		rtMoveCD = Math.max(0f, rtMoveCD - dt);
 		rtAttackCD = Math.max(0f, rtAttackCD - dt);
 		rtThinkCD = Math.max(0f, rtThinkCD - dt);
+		avoidTime = Math.max(0f, avoidTime - dt);
 
 		if (!isAlive() || Dungeon.hero == null || !Dungeon.hero.isAlive()) return;
 		if (paralysed > 0) return;
+
+		// Stuck detection: track if we're stuck at the same position
+		if (pos == lastPos) {
+			timeAtPosition += dt;
+			if (timeAtPosition >= STUCK_THRESHOLD) {
+				stuckAttempts++;
+				// Reset after attempting unstuck behavior
+				if (stuckAttempts > 3) {
+					timeAtPosition = 0f;
+					stuckAttempts = 0;
+				}
+			}
+		} else {
+			// Moved successfully - reset stuck tracking
+			timeAtPosition = 0f;
+			stuckAttempts = 0;
+			lastPos = pos;
+		}
 
 		Char hero = Dungeon.hero;
 		int dist = Dungeon.level.distance(pos, hero.pos);
@@ -839,19 +866,39 @@ public abstract class Mob extends Char {
 
 			// Real-time continuous movement toward target (hero or last seen position)
 			if (rtMoveCD <= 0f && !isMovingSmooth && targetPos != -1) {
-				// Try direct movement first (more natural for real-time)
-				int next = tryDirectMovement(targetPos);
+				int next = -1;
 
-				// Fall back to pathfinding if direct path blocked
+				// If stuck, use unstuck behavior
+				if (stuckAttempts > 0) {
+					next = tryUnstuckMovement(targetPos);
+				}
+
+				// Normal pathfinding if not stuck or unstuck failed
 				if (next == -1) {
-					next = computeStepTowards(targetPos);
+					// Try direct movement first (more natural for real-time)
+					next = tryDirectMovement(targetPos);
+
+					// Fall back to smart pathfinding if direct path blocked
+					if (next == -1) {
+						next = computeSmartPath(targetPos);
+					}
 				}
 
 				if (next != -1) {
-					realtimeMoveTo(next);
-					// Reduced cooldown for smoother, more frequent movement
-					rtMoveCD = Math.max(0.05f, 0.15f / Math.max(0.1f, speed()));
-				} else {
+					// Prevent oscillation: mark previous position to avoid
+					if (avoidPos != -1 && next == avoidPos && avoidTime > 0f) {
+						// Don't move back to position we just left
+						next = -1;
+					} else {
+						avoidPos = pos;  // Mark current position
+						avoidTime = 0.5f;  // Avoid for 0.5 seconds
+						realtimeMoveTo(next);
+						// Reduced cooldown for smoother, more frequent movement
+						rtMoveCD = Math.max(0.05f, 0.15f / Math.max(0.1f, speed()));
+					}
+				}
+
+				if (next == -1) {
 					// No path found; if searching last known position, give up
 					if (!canSeeHero && timeSinceLastSeen > 1f) {
 						state = WANDERING;
@@ -906,12 +953,12 @@ public abstract class Mob extends Char {
 				int chX = ch.pos % w;
 				int chY = ch.pos / w;
 				int distSq = (chX - myX) * (chX - myX) + (chY - myY) * (chY - myY);
-				if (distSq <= 4) nearbyEnemies++; // Within 2 tiles
+				if (distSq <= 2) nearbyEnemies++; // Within ~1.4 tiles (immediate neighbors)
 			}
 		}
 
-		// If crowded, add randomness to prevent bunching
-		boolean preferAlternate = nearbyEnemies > 2 && com.watabou.utils.Random.Int(3) > 0;
+		// If crowded (3+ enemies nearby), add randomness to prevent bunching
+		boolean preferAlternate = nearbyEnemies >= 3 && com.watabou.utils.Random.Int(2) > 0;
 
 		// Try diagonal movement first (most direct)
 		if (dx != 0 && dy != 0 && !preferAlternate) {
@@ -996,6 +1043,100 @@ public abstract class Mob extends Char {
 			}
 		}
 		return best;
+	}
+
+	/**
+	 * Smart pathfinding with crowd avoidance.
+	 * Considers distance to target AND avoids cells near other enemies.
+	 */
+	protected int computeSmartPath(int target) {
+		int best = -1;
+		float bestScore = Float.MAX_VALUE;  // Lower is better
+		int w = Dungeon.level.width();
+
+		for (int d : PathFinder.NEIGHBOURS8) {
+			int c = pos + d;
+			if (!Dungeon.level.insideMap(c)) continue;
+			if (!Dungeon.level.passable[c]) continue;
+			if (Char.hasProp(this, Char.Property.LARGE) && !Dungeon.level.openSpace[c]) continue;
+			if (Actor.findChar(c) != null) continue; // occupied
+
+			// Calculate base distance to target
+			int distToTarget = Dungeon.level.distance(c, target);
+
+			// Count nearby enemies to this candidate cell
+			int cx = c % w;
+			int cy = c / w;
+			float crowdPenalty = 0f;
+
+			for (Char other : Actor.chars()) {
+				if (other == this || other == Dungeon.hero || !other.isAlive()) continue;
+
+				int ox = other.pos % w;
+				int oy = other.pos / w;
+				float dx = cx - ox;
+				float dy = cy - oy;
+				float distSq = dx * dx + dy * dy;
+
+				// Add penalty for cells near other enemies
+				if (distSq < 4) {  // Within 2 tiles
+					crowdPenalty += (4 - distSq) * 0.5f;  // Stronger penalty when closer
+				}
+			}
+
+			// Combined score: distance to target + crowd penalty
+			float score = distToTarget + crowdPenalty;
+
+			if (score < bestScore) {
+				bestScore = score;
+				best = c;
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * Unstuck movement - tries alternative paths when normal pathfinding fails.
+	 * Uses randomness to escape local minima.
+	 */
+	protected int tryUnstuckMovement(int target) {
+		if (Dungeon.level == null) return -1;
+
+		// Try random valid adjacent cells with preference toward target
+		ArrayList<Integer> validCells = new ArrayList<>();
+		ArrayList<Integer> towardTarget = new ArrayList<>();
+
+		int w = Dungeon.level.width();
+		int targetX = target % w;
+		int targetY = target / w;
+		int myX = pos % w;
+		int myY = pos / w;
+
+		for (int d : PathFinder.NEIGHBOURS8) {
+			int c = pos + d;
+			if (!isCellPassable(c)) continue;
+
+			validCells.add(c);
+
+			// Check if this cell is generally toward the target
+			int cx = c % w;
+			int cy = c / w;
+			boolean towardX = (targetX > myX && cx > myX) || (targetX < myX && cx < myX) || (targetX == myX);
+			boolean towardY = (targetY > myY && cy > myY) || (targetY < myY && cy < myY) || (targetY == myY);
+
+			if (towardX || towardY) {
+				towardTarget.add(c);
+			}
+		}
+
+		// Prefer cells toward target, but use any valid cell if needed
+		if (!towardTarget.isEmpty() && Random.Int(3) > 0) {
+			return Random.element(towardTarget);
+		} else if (!validCells.isEmpty()) {
+			return Random.element(validCells);
+		}
+
+		return -1;
 	}
 
 	protected void realtimeMoveTo(int cell) {
