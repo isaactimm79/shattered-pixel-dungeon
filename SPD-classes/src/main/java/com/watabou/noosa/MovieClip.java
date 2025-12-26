@@ -25,7 +25,7 @@ import com.watabou.utils.RectF;
 
 public class MovieClip extends Image {
 
-	protected Animation curAnim;
+	public Animation curAnim;
 	protected int curFrame;
 	protected float frameTimer;
 	protected boolean finished;
