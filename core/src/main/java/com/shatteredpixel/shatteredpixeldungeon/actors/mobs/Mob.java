@@ -885,6 +885,11 @@ public abstract class Mob extends Char {
 					if (next == -1) {
 						next = computeSmartPath(targetPos);
 					}
+
+					// If still blocked (likely by other enemies), try to separate
+					if (next == -1) {
+						next = trySeparation(targetPos);
+					}
 				}
 
 				if (next != -1) {
@@ -956,12 +961,13 @@ public abstract class Mob extends Char {
 				int chX = ch.pos % w;
 				int chY = ch.pos / w;
 				int distSq = (chX - myX) * (chX - myX) + (chY - myY) * (chY - myY);
-				if (distSq <= 2) nearbyEnemies++; // Within ~1.4 tiles (immediate neighbors)
+				if (distSq <= 4) nearbyEnemies++; // Within 2 tiles
 			}
 		}
 
-		// If crowded (3+ enemies nearby), add randomness to prevent bunching
-		boolean preferAlternate = nearbyEnemies >= 3 && com.watabou.utils.Random.Int(2) > 0;
+		// If any enemy nearby, add randomness to prevent bunching
+		// More nearby enemies = higher chance of alternate path
+		boolean preferAlternate = nearbyEnemies >= 1 && com.watabou.utils.Random.Int(3) < nearbyEnemies;
 
 		// Try diagonal movement first (most direct)
 		if (dx != 0 && dy != 0 && !preferAlternate) {
@@ -1100,9 +1106,9 @@ public abstract class Mob extends Char {
 				float dy = cy - oy;
 				float distSq = dx * dx + dy * dy;
 
-				// Add penalty for cells near other enemies
-				if (distSq < 4) {  // Within 2 tiles
-					crowdPenalty += (4 - distSq) * 0.5f;  // Stronger penalty when closer
+				// Add penalty for cells near other enemies - stronger to prevent bunching
+				if (distSq < 9) {  // Within 3 tiles
+					crowdPenalty += (9 - distSq) * 1.5f;  // Much stronger penalty when closer
 				}
 			}
 
@@ -1114,6 +1120,91 @@ public abstract class Mob extends Char {
 				best = c;
 			}
 		}
+		return best;
+	}
+
+	/**
+	 * Active separation - moves away from nearby enemies to prevent bunching.
+	 * Returns a cell that maximizes distance from nearby enemies while staying close to target.
+	 */
+	protected int trySeparation(int target) {
+		if (Dungeon.level == null) return -1;
+
+		int w = Dungeon.level.width();
+		int myX = pos % w;
+		int myY = pos / w;
+
+		// Calculate "push" direction from nearby enemies
+		float pushX = 0f, pushY = 0f;
+		int nearbyCount = 0;
+
+		for (Char other : Actor.chars()) {
+			if (other == this || other == Dungeon.hero || !other.isAlive()) continue;
+
+			int ox = other.pos % w;
+			int oy = other.pos / w;
+			float dx = myX - ox;
+			float dy = myY - oy;
+			float distSq = dx * dx + dy * dy;
+
+			// Only consider enemies within 2 tiles
+			if (distSq > 0 && distSq < 5) {
+				// Push strength inversely proportional to distance
+				float strength = 1f / distSq;
+				pushX += dx * strength;
+				pushY += dy * strength;
+				nearbyCount++;
+			}
+		}
+
+		// Only separate if there are nearby enemies
+		if (nearbyCount == 0) return -1;
+
+		// Normalize push direction
+		float pushLen = (float)Math.sqrt(pushX * pushX + pushY * pushY);
+		if (pushLen > 0.01f) {
+			pushX /= pushLen;
+			pushY /= pushLen;
+		}
+
+		// Also consider direction to target (balance between separation and pursuit)
+		int targetX = target % w;
+		int targetY = target / w;
+		float toTargetX = targetX - myX;
+		float toTargetY = targetY - myY;
+		float targetLen = (float)Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY);
+		if (targetLen > 0.01f) {
+			toTargetX /= targetLen;
+			toTargetY /= targetLen;
+		}
+
+		// Blend: stronger push when more enemies nearby
+		float pushWeight = Math.min(1f, nearbyCount * 0.4f);
+		float combinedX = pushX * pushWeight + toTargetX * (1f - pushWeight);
+		float combinedY = pushY * pushWeight + toTargetY * (1f - pushWeight);
+
+		// Find best cell in the combined direction
+		int best = -1;
+		float bestScore = -Float.MAX_VALUE;
+
+		for (int d : PathFinder.NEIGHBOURS8) {
+			int c = pos + d;
+			if (!isCellPassable(c)) continue;
+
+			int cx = c % w;
+			int cy = c / w;
+			float dx = cx - myX;
+			float dy = cy - myY;
+
+			// Score based on alignment with combined direction
+			float score = dx * combinedX + dy * combinedY;
+
+			if (score > bestScore) {
+				bestScore = score;
+				best = c;
+			}
+		}
+
 		return best;
 	}
 
@@ -1184,9 +1275,9 @@ public abstract class Mob extends Char {
 				float dy = targetY - other.exactY;
 				float distSq = dx * dx + dy * dy;
 
-				// Minimum safe distance: 0.7 tiles (accounts for two enemies passing)
-				// Hero needs more space (0.6), enemies can be slightly closer to each other
-				float minDist = (other == Dungeon.hero) ? 0.6f : 0.5f;
+				// Minimum safe distance to prevent bunching
+				// Hero needs more space, enemies maintain larger spacing between each other
+				float minDist = (other == Dungeon.hero) ? 0.7f : 0.85f;
 
 				if (distSq < minDist * minDist) {
 					// Too close to another character, abort move
