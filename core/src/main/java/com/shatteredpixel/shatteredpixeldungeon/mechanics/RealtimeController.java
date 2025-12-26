@@ -47,7 +47,7 @@ import com.watabou.utils.PathFinder;
 
 /**
  * Stateless controller for realtime interaction logic.
- * Handles spacebar interaction: doors/stairs first, then containers/items.
+ * Handles spacebar interaction: items/containers first, then doors/stairs.
  * Optimized for zero-allocation performance.
  */
 public class RealtimeController {
@@ -58,26 +58,26 @@ public class RealtimeController {
 
 	/**
 	 * Performs realtime interaction for the hero.
-	 * Priority order: Stairs → Locked Doors → Containers → Items
+	 * Priority order: Items → Containers → Locked Doors → Stairs
 	 *
 	 * @param hero The hero performing the interaction
 	 */
 	public static void performInteraction(Hero hero) {
 		if (!RealtimeInput.isEnabled() || Dungeon.level == null) return;
 
-		// A) Try level transitions (stairs/portals)
-		if (tryLevelTransition(hero)) return;
+		// A) Try item pickup first
+		hero.waitOrPickup = true;
+		if (hero.pickup(null)) return;
 
-		// B) Try unlocking adjacent doors
-		if (tryUnlockAdjacentDoors(hero)) return;
-
-		// C) Try interacting with containers
+		// B) Try interacting with containers
 		Heap target = scanForTarget(hero);
 		if (target != null && tryInteractWithHeap(hero, target)) return;
 
-		// D) Fallback to item pickup
-		hero.waitOrPickup = true;
-		hero.pickup(null);
+		// C) Try unlocking adjacent doors
+		if (tryUnlockAdjacentDoors(hero)) return;
+
+		// D) Try level transitions (stairs/portals)
+		tryLevelTransition(hero);
 	}
 
 	/**
