@@ -3083,89 +3083,65 @@ public class Hero extends Char {
 		float targetY = exactY + stepY;
 
 		boolean moved = false;
-		// 1) try full move first
+
+		// VECTOR SLIDING COLLISION SYSTEM
+		// This creates smooth sliding along walls/enemies when moving at angles
+
+		// 1) Try full diagonal movement first
 		if (isPassableCenter(targetX, targetY) && !centerCellOccupied(targetX, targetY)) {
 			exactX = targetX;
 			exactY = targetY;
 			moved = true;
-		} else {
-			// 2) try axis-aligned moves
-			boolean movedX = false;
-			if (stepX != 0 && isPassableCenter(exactX + stepX, exactY) && !centerCellOccupied(exactX + stepX, exactY)) {
-				exactX += stepX;
-				moved = movedX = true;
-			}
-			if (stepY != 0 && isPassableCenter(exactX, exactY + stepY) && !centerCellOccupied(exactX, exactY + stepY)) {
-				exactY += stepY;
-				moved = true;
-			}
-
-			// 3) sequential pass: try X then Y, or Y then X, with full steps
-			if (!moved && stepX != 0 && stepY != 0) {
-				// X then Y
-				if (isPassableCenter(exactX + stepX, exactY)
-						&& isPassableCenter(exactX + stepX, exactY + stepY)
-						&& !centerCellOccupied(exactX + stepX, exactY + stepY)) {
-					exactX += stepX;
-					exactY += stepY;
-					moved = true;
-				} else if (isPassableCenter(exactX, exactY + stepY)
-						&& isPassableCenter(exactX + stepX, exactY + stepY)
-						&& !centerCellOccupied(exactX + stepX, exactY + stepY)) {
-					// Y then X
-					exactY += stepY;
-					exactX += stepX;
-					moved = true;
+		}
+		// 2) SLIDE ALONG X AXIS (preserve horizontal momentum)
+		else if (stepX != 0 && isPassableCenter(exactX + stepX, exactY) && !centerCellOccupied(exactX + stepX, exactY)) {
+			exactX += stepX;
+			// Try to add some Y movement if possible (partial slide)
+			if (stepY != 0) {
+				float partialY = stepY * 0.5f; // Try 50% Y movement
+				if (isPassableCenter(exactX, exactY + partialY) && !centerCellOccupied(exactX, exactY + partialY)) {
+					exactY += partialY;
 				}
 			}
+			moved = true;
+		}
+		// 3) SLIDE ALONG Y AXIS (preserve vertical momentum)
+		else if (stepY != 0 && isPassableCenter(exactX, exactY + stepY) && !centerCellOccupied(exactX, exactY + stepY)) {
+			exactY += stepY;
+			// Try to add some X movement if possible (partial slide)
+			if (stepX != 0) {
+				float partialX = stepX * 0.5f; // Try 50% X movement
+				if (isPassableCenter(exactX + partialX, exactY) && !centerCellOccupied(exactX + partialX, exactY)) {
+					exactX += partialX;
+				}
+			}
+			moved = true;
+		}
+		// 4) Try smaller incremental movements (when wedged against obstacle)
+		else if (!moved) {
+			float[] scales = new float[]{0.5f, 0.25f, 0.1f};
+			for (float scale : scales) {
+				float sx = stepX * scale;
+				float sy = stepY * scale;
 
-			// 4) reduced-step attempts (two-pass with smaller increments)
-			if (!moved) {
-				float[] scales = new float[]{0.5f, 0.25f};
-				for (float s : scales) {
-					float sx = stepX * s;
-					float sy = stepY * s;
-
-					// try scaled full move
-					if ((sx != 0 || sy != 0) && isPassableCenter(exactX + sx, exactY + sy)
-							&& !centerCellOccupied(exactX + sx, exactY + sy)) {
-						exactX += sx;
-						exactY += sy;
-						moved = true;
-						break;
-					}
-					// try scaled axis moves
-					if (sx != 0 && isPassableCenter(exactX + sx, exactY)
-							&& !centerCellOccupied(exactX + sx, exactY)) {
-						exactX += sx;
-						moved = true;
-						break;
-					}
-					if (sy != 0 && isPassableCenter(exactX, exactY + sy)
-							&& !centerCellOccupied(exactX, exactY + sy)) {
-						exactY += sy;
-						moved = true;
-						break;
-					}
-					// try scaled sequential combos
-					if (sx != 0 && sy != 0) {
-						if (isPassableCenter(exactX + sx, exactY)
-								&& isPassableCenter(exactX + sx, exactY + sy)
-								&& !centerCellOccupied(exactX + sx, exactY + sy)) {
-							exactX += sx;
-							exactY += sy;
-							moved = true;
-							break;
-						}
-						if (isPassableCenter(exactX, exactY + sy)
-								&& isPassableCenter(exactX + sx, exactY + sy)
-								&& !centerCellOccupied(exactX + sx, exactY + sy)) {
-							exactY += sy;
-							exactX += sx;
-							moved = true;
-							break;
-						}
-					}
+				// Try scaled diagonal
+				if (isPassableCenter(exactX + sx, exactY + sy) && !centerCellOccupied(exactX + sx, exactY + sy)) {
+					exactX += sx;
+					exactY += sy;
+					moved = true;
+					break;
+				}
+				// Try scaled X only
+				if (sx != 0 && isPassableCenter(exactX + sx, exactY) && !centerCellOccupied(exactX + sx, exactY)) {
+					exactX += sx;
+					moved = true;
+					break;
+				}
+				// Try scaled Y only
+				if (sy != 0 && isPassableCenter(exactX, exactY + sy) && !centerCellOccupied(exactX, exactY + sy)) {
+					exactY += sy;
+					moved = true;
+					break;
 				}
 			}
 		}
