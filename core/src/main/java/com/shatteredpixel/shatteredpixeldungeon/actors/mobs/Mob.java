@@ -595,16 +595,18 @@ public abstract class Mob extends Char {
 				}
 			}
 
-			//generate a new path
+						//generate a new path
 			if (newPath) {
-				//If we aren't hunting, always take a full path
-				PathFinder.Path full = Dungeon.findPath(this, target, Dungeon.level.passable, fieldOfView, true);
+				// Prefer A* for tighter paths
+				boolean[] passFull = Dungeon.findPassable(this, Dungeon.level.passable, fieldOfView, true);
+				PathFinder.Path full = PathFinder.findAStar(pos, target, passFull);
 				if (state != HUNTING){
 					path = full;
 				} else {
 					//otherwise, check if other characters are forcing us to take a very slow route
 					// and don't try to go around them yet in response, basically assume their blockage is temporary
-					PathFinder.Path ignoreChars = Dungeon.findPath(this, target, Dungeon.level.passable, fieldOfView, false);
+					boolean[] passIgnore = Dungeon.findPassable(this, Dungeon.level.passable, fieldOfView, false);
+					PathFinder.Path ignoreChars = PathFinder.findAStar(pos, target, passIgnore);
 					if (ignoreChars != null && (full == null || full.size() > 2*ignoreChars.size())){
 						//check if first cell of shorter path is valid. If it is, use new shorter path. Otherwise do nothing and wait.
 						path = ignoreChars;
@@ -616,6 +618,7 @@ public abstract class Mob extends Char {
 					}
 				}
 			}
+
 
 			if (path != null) {
 				step = path.removeFirst();

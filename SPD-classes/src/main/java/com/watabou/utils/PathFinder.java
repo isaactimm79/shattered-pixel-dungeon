@@ -23,6 +23,9 @@ package com.watabou.utils;
 
 import java.util.Arrays;
 import java.util.LinkedList;
+import java.util.PriorityQueue;
+import java.util.Comparator;
+
 
 public class PathFinder {
 	
@@ -35,6 +38,13 @@ public class PathFinder {
 	
 	private static int size = 0;
 	private static int width = 0;
+
+	// A* working buffers
+	private static int[] gScore;
+	private static int[] fScore;
+	private static int[] cameFrom;
+	private static boolean[] closed;
+
 
 		private static int[] dir;
 	private static int[] dirLR;
@@ -76,8 +86,15 @@ public class PathFinder {
 		NEIGHBOURS9 = new int[]{-width-1, -width, -width+1, -1, 0, +1, +width-1, +width, +width+1};
 
 				CIRCLE4 = new int[]{-width, +1, +width, -1};
-		CIRCLE8 = new int[]{-width-1, -width, -width+1, +1, +width+1, +width, +width-1, -1};
+				CIRCLE8 = new int[]{-width-1, -width, -width+1, +1, +width+1, +width, +width-1, -1};
+
+		// allocate A* buffers
+		gScore = new int[size];
+		fScore = new int[size];
+		cameFrom = new int[size];
+		closed = new boolean[size];
 	}
+
 
 	// Prevents diagonal corner-cutting: for a diagonal step, both adjacent orthogonal cells must be passable
 	private static boolean diagonalClear(int step, int n, boolean[] passable) {
@@ -464,7 +481,80 @@ public class PathFinder {
 		}
 	}
 	
-	@SuppressWarnings("serial")
+		@SuppressWarnings("serial")
 	public static class Path extends LinkedList<Integer> {
 	}
+
+	// ==== A* (8-way, octile heuristic, costs: 10 orthogonal, 14 diagonal) ====
+	private static int heuristic(int a, int b){
+		int ax = a % width;
+		int ay = a / width;
+		int bx = b % width;
+		int by = b / width;
+		int dx = Math.abs(ax - bx);
+		int dy = Math.abs(ay - by);
+		return 10*(dx + dy) - 6*Math.min(dx, dy);
+	}
+
+	public static Path findAStar(int from, int to, boolean[] passable){
+		if (from == to) return new Path();
+		System.arraycopy(maxVal, 0, gScore, 0, maxVal.length);
+		System.arraycopy(maxVal, 0, fScore, 0, maxVal.length);
+		Arrays.fill(cameFrom, -1);
+		Arrays.fill(closed, false);
+
+		gScore[from] = 0;
+		fScore[from] = heuristic(from, to);
+
+		PriorityQueue<Integer> open = new PriorityQueue<Integer>(11, new Comparator<Integer>(){
+			@Override public int compare(Integer a, Integer b){
+				int fa = fScore[a];
+				int fb = fScore[b];
+				return fa < fb ? -1 : (fa > fb ? 1 : 0);
+			}
+		});
+		open.add(from);
+
+		while (!open.isEmpty()){
+			int current = open.poll();
+			if (closed[current]) continue;
+			closed[current] = true;
+
+			if (current == to){
+				Path path = new Path();
+				int cur = to;
+				while (cur != from && cur != -1){
+					path.addFirst(cur);
+					cur = cameFrom[cur];
+				}
+				return path;
+			}
+
+			int start = (current % width == 0 ? 3 : 0);
+			int end   = ((current+1) % width == 0 ? 3 : 0);
+			for (int i = start; i < dirLR.length - end; i++){
+				int n = current + dirLR[i];
+				if (n < 0 || n >= size || !passable[n]) continue;
+				if (diagLR[i] && !diagonalClear(current, n, passable)) continue;
+				if (closed[n]) continue;
+
+				int stepCost = (i == 1 || i == 3 || i == 4 || i == 6) ? 10 : 14;
+				int tentative = gScore[current] + stepCost;
+				if (tentative < gScore[n]){
+					cameFrom[n] = current;
+					gScore[n] = tentative;
+					fScore[n] = tentative + heuristic(n, to);
+					open.add(n);
+				}
+			}
+		}
+		return null;
+	}
+
+	public static int getStepAStar(int from, int to, boolean[] passable){
+		Path p = findAStar(from, to, passable);
+		if (p == null || p.isEmpty()) return -1;
+		return p.getFirst();
+	}
 }
+
