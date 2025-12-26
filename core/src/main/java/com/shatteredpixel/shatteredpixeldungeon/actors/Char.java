@@ -170,7 +170,7 @@ public abstract class Char extends Actor {
 	// Grid position (pos) is still used for turn-based logic
 	public float exactX = 0f;
 	public float exactY = 0f;
-	private boolean exactInit = false; // Track if exact coords are initialized
+	public boolean exactInit = false; // Track if exact coords are initialized
 
 	// Smooth movement interpolation (for enemies and NPCs)
 	// When moving to a new cell, these store the target position
