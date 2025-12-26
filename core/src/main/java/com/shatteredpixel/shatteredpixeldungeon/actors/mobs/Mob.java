@@ -899,27 +899,70 @@ public abstract class Mob extends Char {
 		// No movement needed
 		if (dx == 0 && dy == 0) return -1;
 
+		// Count nearby enemies for crowd avoidance
+		int nearbyEnemies = 0;
+		for (Char ch : Actor.chars()) {
+			if (ch != this && ch != Dungeon.hero && ch.isAlive()) {
+				int chX = ch.pos % w;
+				int chY = ch.pos / w;
+				int distSq = (chX - myX) * (chX - myX) + (chY - myY) * (chY - myY);
+				if (distSq <= 4) nearbyEnemies++; // Within 2 tiles
+			}
+		}
+
+		// If crowded, add randomness to prevent bunching
+		boolean preferAlternate = nearbyEnemies > 2 && com.watabou.utils.Random.Int(3) > 0;
+
 		// Try diagonal movement first (most direct)
-		if (dx != 0 && dy != 0) {
+		if (dx != 0 && dy != 0 && !preferAlternate) {
 			int diagCell = pos + dx + dy * w;
 			if (isCellPassable(diagCell)) {
 				return diagCell;
 			}
 		}
 
-		// Try horizontal movement
-		if (dx != 0) {
-			int hCell = pos + dx;
-			if (isCellPassable(hCell)) {
-				return hCell;
+		// Try horizontal or vertical based on randomness when crowded
+		boolean tryHorizontalFirst = !preferAlternate || com.watabou.utils.Random.Int(2) == 0;
+
+		if (tryHorizontalFirst) {
+			// Try horizontal movement
+			if (dx != 0) {
+				int hCell = pos + dx;
+				if (isCellPassable(hCell)) {
+					return hCell;
+				}
+			}
+
+			// Try vertical movement
+			if (dy != 0) {
+				int vCell = pos + dy * w;
+				if (isCellPassable(vCell)) {
+					return vCell;
+				}
+			}
+		} else {
+			// Try vertical movement first
+			if (dy != 0) {
+				int vCell = pos + dy * w;
+				if (isCellPassable(vCell)) {
+					return vCell;
+				}
+			}
+
+			// Try horizontal movement
+			if (dx != 0) {
+				int hCell = pos + dx;
+				if (isCellPassable(hCell)) {
+					return hCell;
+				}
 			}
 		}
 
-		// Try vertical movement
-		if (dy != 0) {
-			int vCell = pos + dy * w;
-			if (isCellPassable(vCell)) {
-				return vCell;
+		// Last resort: try diagonal if we skipped it earlier
+		if (dx != 0 && dy != 0) {
+			int diagCell = pos + dx + dy * w;
+			if (isCellPassable(diagCell)) {
+				return diagCell;
 			}
 		}
 
@@ -963,26 +1006,29 @@ public abstract class Mob extends Char {
 			return;
 		}
 
-		// Additional collision check for hero's sub-tile position
-		// Hero uses exactX/exactY for smooth movement, so check actual distance
-		if (Dungeon.hero != null && Dungeon.hero.isAlive()) {
+		// Check exact position collision with ALL characters
+		// This prevents enemies from moving through each other during smooth movement
+		if (Dungeon.level != null) {
 			int w = Dungeon.level.width();
 			float targetX = cell % w;
 			float targetY = cell / w;
 
-			// Get hero's actual position (exactX/exactY are public fields)
-			float heroX = Dungeon.hero.exactX;
-			float heroY = Dungeon.hero.exactY;
+			for (Char other : Actor.chars()) {
+				if (other == this || !other.isAlive()) continue;
 
-			// Check distance with collision radius (0.6 tiles is a safe minimum distance)
-			// This accounts for COLLISION_RADIUS (0.3) + MOB_COLLISION_RADIUS (0.28) ≈ 0.58
-			float dx = targetX - heroX;
-			float dy = targetY - heroY;
-			float distSq = dx * dx + dy * dy;
+				// Check distance to other character's exact position
+				float dx = targetX - other.exactX;
+				float dy = targetY - other.exactY;
+				float distSq = dx * dx + dy * dy;
 
-			// Don't move if we'd be too close to the hero (0.6^2 = 0.36)
-			if (distSq < 0.36f) {
-				return;
+				// Minimum safe distance: 0.7 tiles (accounts for two enemies passing)
+				// Hero needs more space (0.6), enemies can be slightly closer to each other
+				float minDist = (other == Dungeon.hero) ? 0.6f : 0.5f;
+
+				if (distSq < minDist * minDist) {
+					// Too close to another character, abort move
+					return;
+				}
 			}
 		}
 
