@@ -1317,9 +1317,13 @@ public abstract class Char extends Actor {
 				exactInit = true;
 			}
 
-			// Set movement target and begin smooth interpolation
-			targetExactX = pos % w;
-			targetExactY = pos / w;
+			// Set movement target with small random offset for organic positioning
+			// Enemies don't snap to exact grid centers, giving more natural look
+			float offsetX = (com.watabou.utils.Random.Float() - 0.5f) * 0.4f; // ±0.2 tiles
+			float offsetY = (com.watabou.utils.Random.Float() - 0.5f) * 0.4f;
+
+			targetExactX = (pos % w) + offsetX;
+			targetExactY = (pos / w) + offsetY;
 			isMovingSmooth = true;
 		}
 
