@@ -313,17 +313,42 @@ public class CharSprite extends MovieClip implements Tweener.Listener, MovieClip
 	}
 	
 	public PointF worldToCamera( int cell ) {
-		
+
 		final int csize = DungeonTilemap.SIZE;
-		
+
 		return new PointF(
 			PixelScene.align(Camera.main, ((cell % Dungeon.level.width()) + 0.5f) * csize - width() * 0.5f),
 			PixelScene.align(Camera.main, ((cell / Dungeon.level.width()) + 1.0f) * csize - height() - csize * perspectiveRaise)
 		);
 	}
-	
+
+	/**
+	 * Converts exact world coordinates (float) to camera coordinates.
+	 * Used for smooth real-time positioning of characters.
+	 */
+	public PointF worldToCamera( float exactX, float exactY ) {
+		final int csize = DungeonTilemap.SIZE;
+
+		return new PointF(
+			PixelScene.align(Camera.main, (exactX + 0.5f) * csize - width() * 0.5f),
+			PixelScene.align(Camera.main, (exactY + 1.0f) * csize - height() - csize * perspectiveRaise)
+		);
+	}
+
 	public void place( int cell ) {
-		point( worldToCamera( cell ) );
+		// If character has exact coordinates, use those for smooth positioning
+		if (ch != null && ch.exactInit && Dungeon.level != null) {
+			point( worldToCamera( ch.exactX, ch.exactY ) );
+		} else {
+			point( worldToCamera( cell ) );
+		}
+	}
+
+	/**
+	 * Places sprite at exact world coordinates (for real-time smooth movement).
+	 */
+	public void placeExact( float exactX, float exactY ) {
+		point( worldToCamera( exactX, exactY ) );
 	}
 	
 	public void showStatus( int color, String text, Object... args ) {

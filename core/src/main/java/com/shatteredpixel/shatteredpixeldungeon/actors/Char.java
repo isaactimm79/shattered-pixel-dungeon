@@ -163,14 +163,20 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 
 public abstract class Char extends Actor {
-	
+
 	public int pos = 0;
-	
+
+	// Real-time continuous position (for smooth movement)
+	// Grid position (pos) is still used for turn-based logic
+	public float exactX = 0f;
+	public float exactY = 0f;
+	private boolean exactInit = false; // Track if exact coords are initialized
+
 	public CharSprite sprite;
-	
+
 	public int HT;
 	public int HP;
-	
+
 	protected float baseSpeed	= 1;
 	protected PathFinder.Path path;
 
@@ -333,26 +339,47 @@ public abstract class Char extends Actor {
 	protected static final String TAG_HT    = "HT";
 	protected static final String TAG_SHLD  = "SHLD";
 	protected static final String BUFFS	    = "buffs";
-	
+	protected static final String EXACT_X   = "exactX";
+	protected static final String EXACT_Y   = "exactY";
+
 	@Override
 	public void storeInBundle( Bundle bundle ) {
-		
+
 		super.storeInBundle( bundle );
-		
+
 		bundle.put( POS, pos );
 		bundle.put( TAG_HP, HP );
 		bundle.put( TAG_HT, HT );
 		bundle.put( BUFFS, buffs );
+
+		// Save exact coordinates (optional, for backward compatibility)
+		if (exactInit) {
+			bundle.put( EXACT_X, exactX );
+			bundle.put( EXACT_Y, exactY );
+		}
 	}
-	
+
 	@Override
 	public void restoreFromBundle( Bundle bundle ) {
-		
+
 		super.restoreFromBundle( bundle );
-		
+
 		pos = bundle.getInt( POS );
 		HP = bundle.getInt( TAG_HP );
 		HT = bundle.getInt( TAG_HT );
+
+		// Restore exact coordinates (if saved), otherwise initialize from grid position
+		if (bundle.contains(EXACT_X) && bundle.contains(EXACT_Y)) {
+			exactX = bundle.getFloat( EXACT_X );
+			exactY = bundle.getFloat( EXACT_Y );
+			exactInit = true;
+		} else if (Dungeon.level != null) {
+			// Initialize from grid position for old saves
+			int w = Dungeon.level.width();
+			exactX = pos % w;
+			exactY = pos / w;
+			exactInit = true;
+		}
 		
 		for (Bundlable b : bundle.getCollection( BUFFS )) {
 			if (b != null) {
@@ -1268,11 +1295,20 @@ public abstract class Char extends Actor {
 		}
 
 		pos = step;
-		
+
+		// Sync exact coordinates to new grid position (for non-hero characters)
+		// Hero manages its own exact coordinates in real-time movement
+		if (!(this instanceof Hero)) {
+			int w = Dungeon.level.width();
+			exactX = pos % w;
+			exactY = pos / w;
+			exactInit = true;
+		}
+
 		if (this != Dungeon.hero) {
 			sprite.visible = Dungeon.level.heroFOV[pos];
 		}
-		
+
 		Dungeon.level.occupyCell(this );
 	}
 	
