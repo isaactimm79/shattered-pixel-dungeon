@@ -1018,10 +1018,20 @@ public abstract class Mob extends Char {
 
 	/**
 	 * Checks if a cell is passable for this mob.
+	 * Flying enemies can move over pits/chasms (avoid[] cells).
 	 */
 	protected boolean isCellPassable(int cell) {
 		if (!Dungeon.level.insideMap(cell)) return false;
-		if (!Dungeon.level.passable[cell]) return false;
+
+		// Flying enemies can move into avoid[] cells (pits/chasms)
+		if (!Dungeon.level.passable[cell]) {
+			if (flying && Dungeon.level.avoid[cell]) {
+				// Flying over pit - allowed
+			} else {
+				return false;
+			}
+		}
+
 		if (Char.hasProp(this, Char.Property.LARGE) && !Dungeon.level.openSpace[cell]) return false;
 		if (Actor.findChar(cell) != null) return false;
 		return true;
@@ -1032,10 +1042,7 @@ public abstract class Mob extends Char {
 		int bestDist = Integer.MAX_VALUE;
 		for (int d : PathFinder.NEIGHBOURS8) {
 			int c = pos + d;
-			if (!Dungeon.level.insideMap(c)) continue;
-			if (!Dungeon.level.passable[c]) continue;
-			if (Char.hasProp(this, Char.Property.LARGE) && !Dungeon.level.openSpace[c]) continue;
-			if (Actor.findChar(c) != null) continue; // occupied
+			if (!isCellPassable(c)) continue; // Use unified passability check (includes flying over pits)
 			int nd = Dungeon.level.distance(c, target);
 			if (nd < bestDist) {
 				bestDist = nd;
@@ -1048,6 +1055,7 @@ public abstract class Mob extends Char {
 	/**
 	 * Smart pathfinding with crowd avoidance.
 	 * Considers distance to target AND avoids cells near other enemies.
+	 * Flying enemies can path over pits/chasms.
 	 */
 	protected int computeSmartPath(int target) {
 		int best = -1;
@@ -1056,10 +1064,7 @@ public abstract class Mob extends Char {
 
 		for (int d : PathFinder.NEIGHBOURS8) {
 			int c = pos + d;
-			if (!Dungeon.level.insideMap(c)) continue;
-			if (!Dungeon.level.passable[c]) continue;
-			if (Char.hasProp(this, Char.Property.LARGE) && !Dungeon.level.openSpace[c]) continue;
-			if (Actor.findChar(c) != null) continue; // occupied
+			if (!isCellPassable(c)) continue; // Use unified passability check (includes flying over pits)
 
 			// Calculate base distance to target
 			int distToTarget = Dungeon.level.distance(c, target);
