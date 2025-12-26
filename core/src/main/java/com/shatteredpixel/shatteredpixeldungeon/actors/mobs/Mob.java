@@ -807,15 +807,23 @@ public abstract class Mob extends Char {
 				return;
 			}
 
-			// Move toward the hero when off cooldown (and not already moving)
+			// Real-time continuous movement toward hero
 			if (rtMoveCD <= 0f && !isMovingSmooth) {
-				int next = computeStepTowards(hero.pos);
+				// Try direct movement first (more natural for real-time)
+				int next = tryDirectMovement(hero.pos);
+
+				// Fall back to pathfinding if direct path blocked
+				if (next == -1) {
+					next = computeStepTowards(hero.pos);
+				}
+
 				if (next != -1) {
 					realtimeMoveTo(next);
-					rtMoveCD = Math.max(0.08f, 0.25f / Math.max(0.1f, speed()));
+					// Reduced cooldown for smoother, more frequent movement
+					rtMoveCD = Math.max(0.05f, 0.15f / Math.max(0.1f, speed()));
 				} else {
 					// No path found; wait briefly before trying again
-					rtThinkCD = 0.25f;
+					rtThinkCD = 0.15f;
 				}
 			}
 		} else if (state == WANDERING) {
@@ -831,6 +839,68 @@ public abstract class Mob extends Char {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Attempts direct movement toward target for more natural real-time AI.
+	 * Checks if enemy can move in a straight line toward target without obstacles.
+	 *
+	 * @param target Target cell position
+	 * @return Next cell to move to, or -1 if blocked
+	 */
+	protected int tryDirectMovement(int target) {
+		if (Dungeon.level == null) return -1;
+
+		int w = Dungeon.level.width();
+
+		// Calculate direction vector to target
+		int myX = pos % w;
+		int myY = pos / w;
+		int targetX = target % w;
+		int targetY = target / w;
+
+		int dx = Integer.signum(targetX - myX);
+		int dy = Integer.signum(targetY - myY);
+
+		// No movement needed
+		if (dx == 0 && dy == 0) return -1;
+
+		// Try diagonal movement first (most direct)
+		if (dx != 0 && dy != 0) {
+			int diagCell = pos + dx + dy * w;
+			if (isCellPassable(diagCell)) {
+				return diagCell;
+			}
+		}
+
+		// Try horizontal movement
+		if (dx != 0) {
+			int hCell = pos + dx;
+			if (isCellPassable(hCell)) {
+				return hCell;
+			}
+		}
+
+		// Try vertical movement
+		if (dy != 0) {
+			int vCell = pos + dy * w;
+			if (isCellPassable(vCell)) {
+				return vCell;
+			}
+		}
+
+		return -1; // All direct paths blocked
+	}
+
+	/**
+	 * Checks if a cell is passable for this mob.
+	 */
+	protected boolean isCellPassable(int cell) {
+		if (!Dungeon.level.insideMap(cell)) return false;
+		if (!Dungeon.level.passable[cell]) return false;
+		if (Char.hasProp(this, Char.Property.LARGE) && !Dungeon.level.openSpace[cell]) return false;
+		if (Actor.findChar(cell) != null) return false;
+		return true;
 	}
 
 	protected int computeStepTowards(int target) {
