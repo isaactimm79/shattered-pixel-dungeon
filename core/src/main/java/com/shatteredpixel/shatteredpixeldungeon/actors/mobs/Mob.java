@@ -775,6 +775,9 @@ public abstract class Mob extends Char {
 	protected float rtThinkCD = 0f;
 
 	public void updateRealtime(float dt) {
+		// Update smooth movement interpolation first (moves sprite toward target)
+		updateMovement(dt);
+
 		// Tick cooldowns
 		rtMoveCD = Math.max(0f, rtMoveCD - dt);
 		rtAttackCD = Math.max(0f, rtAttackCD - dt);
@@ -879,10 +882,9 @@ public abstract class Mob extends Char {
 			}
 		}
 
-		int from = pos;
-		pos = cell;
-		if (sprite != null) sprite.move(from, cell);
-		Dungeon.level.occupyCell(this);
+		// Use Char.move() to set up smooth movement interpolation
+		// This will trigger the smooth movement system instead of instant sprite.move()
+		move(cell, true);
 	}
 
 
