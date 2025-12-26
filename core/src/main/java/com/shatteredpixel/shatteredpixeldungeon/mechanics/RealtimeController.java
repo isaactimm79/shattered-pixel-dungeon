@@ -58,7 +58,7 @@ public class RealtimeController {
 
 	/**
 	 * Performs realtime interaction for the hero.
-	 * Priority order: Items → Containers → Locked Doors → Stairs
+	 * Priority order: Containers → Items → Locked Doors → Stairs
 	 *
 	 * @param hero The hero performing the interaction
 	 */
@@ -67,13 +67,7 @@ public class RealtimeController {
 
 		GLog.i("[DEBUG] Spacebar pressed - performInteraction called");
 
-		// A) Try item pickup first
-		hero.waitOrPickup = true;
-		boolean pickedUp = hero.pickup(null);
-		GLog.i("[DEBUG] Item pickup attempt: %s", pickedUp ? "SUCCESS (returning early)" : "FAILED");
-		if (pickedUp) return;
-
-		// B) Try interacting with containers
+		// A) Try interacting with containers FIRST (highest priority)
 		Heap target = scanForTarget(hero);
 		GLog.i("[DEBUG] Container scan result: %s", target != null ? "Found heap at " + target.pos : "No containers found");
 		if (target != null) {
@@ -81,6 +75,12 @@ public class RealtimeController {
 			GLog.i("[DEBUG] Container interaction: %s", interacted ? "SUCCESS" : "FAILED");
 			if (interacted) return;
 		}
+
+		// B) Try item pickup (only if no containers nearby)
+		hero.waitOrPickup = true;
+		boolean pickedUp = hero.pickup(null);
+		GLog.i("[DEBUG] Item pickup attempt: %s", pickedUp ? "SUCCESS (returning early)" : "FAILED");
+		if (pickedUp) return;
 
 		// C) Try unlocking adjacent doors
 		boolean doorUnlocked = tryUnlockAdjacentDoors(hero);
