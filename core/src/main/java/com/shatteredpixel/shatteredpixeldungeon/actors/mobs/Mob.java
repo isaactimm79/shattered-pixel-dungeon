@@ -796,9 +796,9 @@ public abstract class Mob extends Char {
 		}
 
 		if (state == HUNTING) {
-			// Attack when adjacent and off cooldown
+			// Attack when adjacent and off cooldown (but not while moving)
 			if (dist <= 1) {
-				if (rtAttackCD <= 0f && canAttack(hero) && invisible == 0 && !isCharmedBy(hero)) {
+				if (rtAttackCD <= 0f && !isMovingSmooth && canAttack(hero) && invisible == 0 && !isCharmedBy(hero)) {
 					// Apply combat directly without spending actor time
 					attack(hero);
 					Invisibility.dispel(this);
@@ -807,8 +807,8 @@ public abstract class Mob extends Char {
 				return;
 			}
 
-			// Move toward the hero when off cooldown
-			if (rtMoveCD <= 0f) {
+			// Move toward the hero when off cooldown (and not already moving)
+			if (rtMoveCD <= 0f && !isMovingSmooth) {
 				int next = computeStepTowards(hero.pos);
 				if (next != -1) {
 					realtimeMoveTo(next);
@@ -819,8 +819,8 @@ public abstract class Mob extends Char {
 				}
 			}
 		} else if (state == WANDERING) {
-			// Optional: occasional wandering step
-			if (rtMoveCD <= 0f && rtThinkCD <= 0f) {
+			// Optional: occasional wandering step (not while already moving)
+			if (rtMoveCD <= 0f && rtThinkCD <= 0f && !isMovingSmooth) {
 				int randomTarget = ((Wandering)WANDERING).randomDestination();
 				int next = computeStepTowards(randomTarget);
 				if (next != -1) {
