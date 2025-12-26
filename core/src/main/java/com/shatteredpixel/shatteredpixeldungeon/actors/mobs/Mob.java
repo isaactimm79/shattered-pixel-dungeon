@@ -678,6 +678,17 @@ public abstract class Mob extends Char {
 	
 	@Override
 	public void onAttackComplete() {
+		// Handle real-time attack animation completion
+		if (rtAttacking && rtAttackTarget != null) {
+			attack(rtAttackTarget);
+			// Don't call spend() in real-time mode - cooldown handled separately
+			rtAttacking = false;
+			rtAttackTarget = null;
+			super.onAttackComplete();
+			return;
+		}
+
+		// Original turn-based attack completion
 		attack( enemy );
 		Invisibility.dispel(this);
 		spend( attackDelay() );
@@ -776,6 +787,8 @@ public abstract class Mob extends Char {
 	protected float rtMoveCD = 0f;
 	protected float rtAttackCD = 0f;
 	protected float rtThinkCD = 0f;
+	protected Char rtAttackTarget = null;  // Target for real-time attack animation
+	protected boolean rtAttacking = false;  // True while playing attack animation
 
 	// Line of sight tracking for stealth gameplay
 	protected int lastSeenHeroPos = -1;  // Last known hero position
@@ -865,9 +878,18 @@ public abstract class Mob extends Char {
 		if (state == HUNTING) {
 			// Attack when adjacent and can see hero (no blind attacks!)
 			if (dist <= 1 && canSeeHero) {
-				if (rtAttackCD <= 0f && !isMovingSmooth && canAttack(hero) && invisible == 0 && !isCharmedBy(hero)) {
-					// Apply combat directly without spending actor time
-					attack(hero);
+				if (rtAttackCD <= 0f && !isMovingSmooth && !rtAttacking && canAttack(hero) && invisible == 0 && !isCharmedBy(hero)) {
+					// Trigger attack animation - damage applied in onAttackComplete()
+					rtAttackTarget = hero;
+					rtAttacking = true;
+					if (sprite != null && sprite.visible) {
+						sprite.attack(hero.pos);
+					} else {
+						// If sprite not visible, attack immediately without animation
+						attack(hero);
+						rtAttacking = false;
+						rtAttackTarget = null;
+					}
 					Invisibility.dispel(this);
 					rtAttackCD = Math.max(0.1f, attackDelay());
 				}
