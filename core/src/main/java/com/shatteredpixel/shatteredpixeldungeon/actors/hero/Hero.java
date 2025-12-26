@@ -235,6 +235,10 @@ public class Hero extends Char {
 	private int lastGridX = -1;
 	private int lastGridY = -1;
 
+	// Stuck detection: counts frames where movement was attempted but failed
+	private int stuckFrameCounter = 0;
+	private static final int STUCK_THRESHOLD = 10; // frames before aggressive escape
+
 	// Track last movement direction for click-to-attack (cardinal/diagonal)
 	private int lastDirX = 0;
 	private int lastDirY = 0;
@@ -2629,6 +2633,9 @@ public class Hero extends Char {
 			attemptSlide(stepX, stepY);
 		}
 
+		// Active separation: push hero away from enemies if too close
+		// This prevents stuck states from forming in the first place
+		applyEnemySeparation(deltaTime);
 
 		// Sync grid position for gameplay logic
 		syncGridPosToExact();
@@ -3163,25 +3170,194 @@ public class Hero extends Char {
 			}
 		}
 
-		// Emergency force-move: if completely stuck and couldn't move with any of the above
-		// attempts, force a tiny move in the desired direction (ignoring collision, only checking terrain)
-		if (!moved && isHeroStuck() && (stepX != 0 || stepY != 0)) {
-			// Use very small step (10% of normal) to gradually escape
-			float emergencyX = exactX + stepX * 0.1f;
-			float emergencyY = exactY + stepY * 0.1f;
+		// Enhanced Emergency Escape System
+		// Track stuck frames and apply progressively more aggressive escape mechanisms
+		if (!moved && (stepX != 0 || stepY != 0)) {
+			stuckFrameCounter++;
 
-			// Only check terrain (not character collision)
-			if (isTerrainPassable(emergencyX, emergencyY)) {
-				exactX = emergencyX;
-				exactY = emergencyY;
-				moved = true;
+			if (isHeroStuck()) {
+				// Calculate escape force based on how long we've been stuck
+				// Start at 15%, increase to 50% over STUCK_THRESHOLD frames
+				float escapePercent = 0.15f + (Math.min(stuckFrameCounter, STUCK_THRESHOLD) / (float)STUCK_THRESHOLD) * 0.35f;
+
+				// Try moving in the desired direction
+				float emergencyX = exactX + stepX * escapePercent;
+				float emergencyY = exactY + stepY * escapePercent;
+
+				if (isTerrainPassable(emergencyX, emergencyY)) {
+					exactX = emergencyX;
+					exactY = emergencyY;
+					moved = true;
+				}
+
+				// If still stuck after threshold, try perpendicular escapes
+				if (!moved && stuckFrameCounter > STUCK_THRESHOLD) {
+					// Try perpendicular directions (rotate 90 degrees)
+					float perpX1 = exactX + (-stepY) * escapePercent;
+					float perpY1 = exactY + (stepX) * escapePercent;
+
+					if (isTerrainPassable(perpX1, perpY1)) {
+						exactX = perpX1;
+						exactY = perpY1;
+						moved = true;
+					} else {
+						// Try opposite perpendicular
+						float perpX2 = exactX + (stepY) * escapePercent;
+						float perpY2 = exactY + (-stepX) * escapePercent;
+
+						if (isTerrainPassable(perpX2, perpY2)) {
+							exactX = perpX2;
+							exactY = perpY2;
+							moved = true;
+						}
+					}
+				}
+
+				// Last resort: if stuck for too long, push away from nearest enemy
+				if (!moved && stuckFrameCounter > STUCK_THRESHOLD * 2) {
+					float[] escapeDir = calculateEscapeDirection();
+					if (escapeDir != null) {
+						float escapeX = exactX + escapeDir[0] * escapePercent;
+						float escapeY = exactY + escapeDir[1] * escapePercent;
+
+						if (isTerrainPassable(escapeX, escapeY)) {
+							exactX = escapeX;
+							exactY = escapeY;
+							moved = true;
+						}
+					}
+				}
 			}
 		}
 
 		if (moved) {
 			// Clear pathing related flags used by turn-based move
 			walkingToVisibleTrapInFog = false;
+			// Reset stuck counter on successful movement
+			stuckFrameCounter = Math.max(0, stuckFrameCounter - 2);
+		} else if (stepX == 0 && stepY == 0) {
+			// Not trying to move, reset counter
+			stuckFrameCounter = 0;
 		}
+	}
+
+	/**
+	 * Actively pushes hero away from enemies if they get too close.
+	 * This prevents stuck states from forming in the first place.
+	 * Uses a gentle repulsion force proportional to overlap.
+	 */
+	private void applyEnemySeparation(float deltaTime) {
+		if (Dungeon.level == null) return;
+
+		int w = Dungeon.level.width();
+		float separationForce = 2.0f; // tiles per second when fully overlapping
+		float minDist = COLLISION_RADIUS + MOB_COLLISION_RADIUS;
+		float minDistSq = minDist * minDist;
+
+		float pushX = 0f;
+		float pushY = 0f;
+		int pushCount = 0;
+
+		// Check all nearby characters
+		for (Char c : Actor.chars()) {
+			if (c == this || !c.isAlive()) continue;
+
+			float cx = (c.pos % w);
+			float cy = (c.pos / w);
+			float dx = exactX - cx;
+			float dy = exactY - cy;
+			float distSq = dx * dx + dy * dy;
+
+			// If within minimum separation distance, apply repulsion
+			if (distSq < minDistSq && distSq > 0.0001f) {
+				float dist = (float)Math.sqrt(distSq);
+				float overlap = minDist - dist;
+				float strength = overlap / minDist; // 0 to 1, where 1 = fully overlapping
+
+				// Normalize and accumulate push direction
+				pushX += (dx / dist) * strength;
+				pushY += (dy / dist) * strength;
+				pushCount++;
+			}
+		}
+
+		// Apply accumulated push force
+		if (pushCount > 0) {
+			// Average the push directions
+			pushX /= pushCount;
+			pushY /= pushCount;
+
+			// Normalize and scale by separation force and deltaTime
+			float len = (float)Math.sqrt(pushX * pushX + pushY * pushY);
+			if (len > 0.01f) {
+				pushX = (pushX / len) * separationForce * deltaTime;
+				pushY = (pushY / len) * separationForce * deltaTime;
+
+				// Apply push if terrain allows
+				float newX = exactX + pushX;
+				float newY = exactY + pushY;
+
+				if (isTerrainPassable(newX, newY)) {
+					exactX = newX;
+					exactY = newY;
+				} else {
+					// Try axis-aligned pushes if diagonal fails
+					if (isTerrainPassable(exactX + pushX, exactY)) {
+						exactX += pushX;
+					}
+					if (isTerrainPassable(exactX, exactY + pushY)) {
+						exactY += pushY;
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Calculates the direction to escape from enemies when stuck.
+	 * Returns normalized vector [dx, dy] pointing away from nearest enemy,
+	 * or null if no enemies nearby.
+	 */
+	private float[] calculateEscapeDirection() {
+		if (Dungeon.level == null) return null;
+
+		int w = Dungeon.level.width();
+		Char nearestEnemy = null;
+		float nearestDistSq = Float.MAX_VALUE;
+
+		// Find nearest enemy
+		for (Char c : Actor.chars()) {
+			if (c == this || !c.isAlive()) continue;
+
+			float cx = (c.pos % w);
+			float cy = (c.pos / w);
+			float dx = exactX - cx;
+			float dy = exactY - cy;
+			float distSq = dx * dx + dy * dy;
+
+			if (distSq < nearestDistSq) {
+				nearestDistSq = distSq;
+				nearestEnemy = c;
+			}
+		}
+
+		// If no enemy found or enemy is far away, return null
+		if (nearestEnemy == null || nearestDistSq > 4.0f) return null;
+
+		// Calculate direction away from nearest enemy
+		float cx = (nearestEnemy.pos % w);
+		float cy = (nearestEnemy.pos / w);
+		float dx = exactX - cx;
+		float dy = exactY - cy;
+
+		// Normalize
+		float len = (float)Math.sqrt(dx * dx + dy * dy);
+		if (len < 0.01f) {
+			// If exactly on top of enemy, escape in a random perpendicular direction
+			return new float[]{1.0f, 0.0f};
+		}
+
+		return new float[]{dx / len, dy / len};
 	}
 
 	private boolean isTerrainPassable(float tx, float ty) {
