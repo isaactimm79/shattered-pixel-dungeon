@@ -1342,6 +1342,19 @@ public abstract class Char extends Actor {
 			return;
 		}
 
+		// Play run animation and orient sprite toward movement direction
+		if (sprite != null && sprite.run != null) {
+			if (sprite.curAnim != sprite.run) {
+				sprite.play(sprite.run);
+			}
+
+			// Face the direction of movement
+			// Calculate target cell from exact coordinates
+			int w = Dungeon.level != null ? Dungeon.level.width() : 32;
+			int targetCell = (int)targetExactX + (int)targetExactY * w;
+			sprite.turnTo(pos, targetCell);
+		}
+
 		// Calculate movement delta for this frame
 		float moveDistance = SMOOTH_MOVE_SPEED * deltaTime;
 
@@ -1356,9 +1369,12 @@ public abstract class Char extends Actor {
 			exactY = targetExactY;
 			isMovingSmooth = false;
 
-			// Update sprite position
+			// Update sprite position and return to idle animation
 			if (sprite != null) {
 				sprite.placeExact(exactX, exactY);
+				if (sprite.idle != null) {
+					sprite.play(sprite.idle);
+				}
 			}
 			return;
 		}
