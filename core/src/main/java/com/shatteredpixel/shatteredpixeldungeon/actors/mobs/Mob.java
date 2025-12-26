@@ -794,9 +794,14 @@ public abstract class Mob extends Char {
 		Char hero = Dungeon.hero;
 		int dist = Dungeon.level.distance(pos, hero.pos);
 
+		// Update field of view for line-of-sight checks
+		if (fieldOfView == null || fieldOfView.length != Dungeon.level.length()) {
+			fieldOfView = new boolean[Dungeon.level.length()];
+		}
+		Dungeon.level.updateFieldOfView(this, fieldOfView);
+
 		// Line of sight check - can we see the hero?
-		boolean canSeeHero = fieldOfView != null && fieldOfView.length == Dungeon.level.length()
-							&& fieldOfView[hero.pos] && hero.invisible <= 0;
+		boolean canSeeHero = fieldOfView[hero.pos] && hero.invisible <= 0;
 
 		// Update last seen information
 		if (canSeeHero) {
