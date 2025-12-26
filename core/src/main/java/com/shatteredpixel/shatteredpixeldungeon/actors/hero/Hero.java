@@ -225,7 +225,9 @@ public class Hero extends Char {
 	private boolean exactInit = false;
 		private static final float REALTIME_MOVE_TILES_PER_SEC = 6.0f; // base speed; multiplied by speed()
 	private static final float COLLISION_RADIUS = 0.3f; // in tile units; 1.0 == full tile
-	private static final float MOB_COLLISION_RADIUS = 0.28f; // enemy collision radius (tune to reduce sticking)
+	private static final float MOB_COLLISION_RADIUS = 0.18f; // enemy collision radius (reduced to prevent sticking)
+	// NOTE: Sprite hitboxes are configured but collision currently uses radius-based detection
+	// TODO: Integrate sprite.getHitbox() for proper per-enemy collision sizes
 								private static final float PICKUP_RANGE = 1.5f; // in tiles, realtime pickup radius
 
 	// Allows operate distance checks to pass when we initiated an interact via teleport trick
