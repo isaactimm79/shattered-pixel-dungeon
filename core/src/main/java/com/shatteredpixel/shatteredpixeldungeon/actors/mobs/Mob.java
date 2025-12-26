@@ -774,6 +774,11 @@ public abstract class Mob extends Char {
 	protected float rtAttackCD = 0f;
 	protected float rtThinkCD = 0f;
 
+	// Line of sight tracking for stealth gameplay
+	protected int lastSeenHeroPos = -1;  // Last known hero position
+	protected float timeSinceLastSeen = 0f;  // Time since enemy saw hero
+	protected static final float MEMORY_DURATION = 3f;  // Remember hero for 3 seconds after losing sight
+
 	public void updateRealtime(float dt) {
 		// Update smooth movement interpolation first (moves sprite toward target)
 		updateMovement(dt);
@@ -789,15 +794,35 @@ public abstract class Mob extends Char {
 		Char hero = Dungeon.hero;
 		int dist = Dungeon.level.distance(pos, hero.pos);
 
-		// Awareness: if close enough, chase the hero
+		// Line of sight check - can we see the hero?
+		boolean canSeeHero = fieldOfView != null && fieldOfView.length == Dungeon.level.length()
+							&& fieldOfView[hero.pos] && hero.invisible <= 0;
+
+		// Update last seen information
+		if (canSeeHero) {
+			lastSeenHeroPos = hero.pos;
+			timeSinceLastSeen = 0f;
+		} else {
+			timeSinceLastSeen += dt;
+		}
+
+		// Determine target position (current hero pos or last known)
+		int targetPos = canSeeHero ? hero.pos : lastSeenHeroPos;
+		boolean hasMemory = timeSinceLastSeen < MEMORY_DURATION && lastSeenHeroPos != -1;
+
+		// Awareness: if we can see hero OR remember recent position, chase them
 		boolean inAwareness = dist <= Math.max(4, viewDistance + 1);
-		if (inAwareness && state != PASSIVE && buff(Charm.class) == null) {
+		if (inAwareness && (canSeeHero || hasMemory) && state != PASSIVE && buff(Charm.class) == null) {
 			state = HUNTING;
+		} else if (state == HUNTING && !canSeeHero && !hasMemory) {
+			// Lost the hero - give up and wander
+			state = WANDERING;
+			lastSeenHeroPos = -1;
 		}
 
 		if (state == HUNTING) {
-			// Attack when adjacent and off cooldown (but not while moving)
-			if (dist <= 1) {
+			// Attack when adjacent and can see hero (no blind attacks!)
+			if (dist <= 1 && canSeeHero) {
 				if (rtAttackCD <= 0f && !isMovingSmooth && canAttack(hero) && invisible == 0 && !isCharmedBy(hero)) {
 					// Apply combat directly without spending actor time
 					attack(hero);
@@ -807,14 +832,14 @@ public abstract class Mob extends Char {
 				return;
 			}
 
-			// Real-time continuous movement toward hero
-			if (rtMoveCD <= 0f && !isMovingSmooth) {
+			// Real-time continuous movement toward target (hero or last seen position)
+			if (rtMoveCD <= 0f && !isMovingSmooth && targetPos != -1) {
 				// Try direct movement first (more natural for real-time)
-				int next = tryDirectMovement(hero.pos);
+				int next = tryDirectMovement(targetPos);
 
 				// Fall back to pathfinding if direct path blocked
 				if (next == -1) {
-					next = computeStepTowards(hero.pos);
+					next = computeStepTowards(targetPos);
 				}
 
 				if (next != -1) {
@@ -822,7 +847,11 @@ public abstract class Mob extends Char {
 					// Reduced cooldown for smoother, more frequent movement
 					rtMoveCD = Math.max(0.05f, 0.15f / Math.max(0.1f, speed()));
 				} else {
-					// No path found; wait briefly before trying again
+					// No path found; if searching last known position, give up
+					if (!canSeeHero && timeSinceLastSeen > 1f) {
+						state = WANDERING;
+						lastSeenHeroPos = -1;
+					}
 					rtThinkCD = 0.15f;
 				}
 			}
