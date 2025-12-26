@@ -69,8 +69,13 @@ public class GooSprite extends MobSprite {
 		
 		die = new Animation( 10, false );
 		die.frames( frames, 5, 6, 7 );
-		
+
 		play(idle);
+
+		// Custom hitbox: Goo sprite is 20x14 pixels (blob-shaped boss)
+		// Use 16x11 hitbox (80% of sprite, wider for blob shape) centered for refined collision
+		// Offset calculation: (20-16)/2 = 2, (14-11)/2 = 1.5
+		setHitboxCustom(16f, 11f, 2f, 1.5f);
 
 		spray = centerEmitter();
 		if (spray != null) {

@@ -50,8 +50,13 @@ public class MonkSprite extends MobSprite {
 		
 		die = new Animation( 15, false );
 		die.frames( frames, 1, 7, 8, 8, 9, 10 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Monk sprite is 15x14 pixels
+		// Use 12x11 hitbox (80% of sprite) centered for refined collision
+		// Offset calculation: (15-12)/2 = 1.5, (14-11)/2 = 1.5
+		setHitboxCustom(12f, 11f, 1.5f, 1.5f);
 	}
 	
 	@Override

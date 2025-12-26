@@ -44,8 +44,13 @@ public class BeeSprite extends MobSprite {
 		
 		die = new Animation( 20, false );
 		die.frames( frames, 7, 8, 9, 10 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Bee sprite is 16x16 pixels
+		// Use 8x8 hitbox (50% of sprite) centered for refined collision
+		// Offset calculation: (16-8)/2 = 4
+		setHitboxCustom(8f, 8f, 4f, 4f);
 	}
 	
 	@Override

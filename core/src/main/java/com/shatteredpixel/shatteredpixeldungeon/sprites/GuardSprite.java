@@ -48,6 +48,11 @@ public class GuardSprite extends MobSprite {
 		die.frames( frames, 11, 12, 13, 14 );
 
 		play( idle );
+
+		// Custom hitbox: Guard sprite is 12x16 pixels
+		// Use 10x13 hitbox (80% of sprite) centered for refined collision
+		// Offset calculation: (12-10)/2 = 1, (16-13)/2 = 1.5
+		setHitboxCustom(10f, 13f, 1f, 1.5f);
 	}
 
 	@Override

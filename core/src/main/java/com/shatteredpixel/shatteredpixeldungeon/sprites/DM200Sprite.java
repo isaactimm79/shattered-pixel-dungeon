@@ -56,6 +56,11 @@ public class DM200Sprite extends MobSprite {
 		die.frames( frames, 9, 10, 11 );
 
 		play( idle );
+
+		// Custom hitbox: DM-200 sprite is 21x18 pixels (large robot!)
+		// Use 17x15 hitbox (80% of sprite) centered for refined collision
+		// Offset calculation: (21-17)/2 = 2, (18-15)/2 = 1.5
+		setHitboxCustom(17f, 15f, 2f, 1.5f);
 	}
 
 	public void zap( int cell ) {

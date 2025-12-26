@@ -43,10 +43,15 @@ public class DM300Sprite extends MobSprite {
 	
 	public DM300Sprite() {
 		super();
-		
+
 		texture( Assets.Sprites.DM300 );
-		
+
 		updateChargeState(false);
+
+		// Custom hitbox: DM-300 sprite is 25x22 pixels (huge robot boss!)
+		// Use 20x18 hitbox (80% of sprite) centered for refined collision
+		// Offset calculation: (25-20)/2 = 2.5, (22-18)/2 = 2
+		setHitboxCustom(20f, 18f, 2.5f, 2f);
 	}
 
 	public void updateChargeState( boolean enraged ){

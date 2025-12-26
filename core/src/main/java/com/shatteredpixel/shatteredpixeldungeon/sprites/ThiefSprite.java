@@ -43,7 +43,12 @@ public class ThiefSprite extends MobSprite {
 		
 		attack = new Animation( 12, false );
 		attack.frames( film, 10, 11, 12, 0 );
-		
+
 		idle();
+
+		// Custom hitbox: Thief sprite is 12x13 pixels
+		// Use 9x10 hitbox (75% of sprite) centered for refined collision
+		// Offset calculation: (12-9)/2 = 1.5, (13-10)/2 = 1.5
+		setHitboxCustom(9f, 10f, 1.5f, 1.5f);
 	}
 }

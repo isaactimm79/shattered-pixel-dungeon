@@ -44,7 +44,12 @@ public class BatSprite extends MobSprite {
 		
 		die = new Animation( 12, false );
 		die.frames( frames, 4, 5, 6 );
-		
+
 		play( idle );
+
+		// Custom hitbox: Bat sprite is 15x15 pixels
+		// Use 7x7 hitbox (smaller for flying enemy) centered for refined collision
+		// Offset calculation: (15-7)/2 = 4
+		setHitboxCustom(7f, 7f, 4f, 4f);
 	}
 }

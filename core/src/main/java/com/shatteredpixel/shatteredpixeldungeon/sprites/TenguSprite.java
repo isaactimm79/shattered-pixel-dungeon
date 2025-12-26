@@ -50,9 +50,14 @@ public class TenguSprite extends MobSprite {
 		
 		die = new Animation( 8, false );
 		die.frames( frames, 8, 9, 10, 10, 10, 10, 10, 10 );
-		
+
 		play( run );
 		isMoving = true;
+
+		// Custom hitbox: Tengu sprite is 14x16 pixels (ninja boss)
+		// Use 11x13 hitbox (80-85% of sprite) centered for refined collision
+		// Offset calculation: (14-11)/2 = 1.5, (16-13)/2 = 1.5
+		setHitboxCustom(11f, 13f, 1.5f, 1.5f);
 	}
 
 	@Override
