@@ -2943,24 +2943,88 @@ public class Hero extends Char {
 			&& isTilePassableAt(tx, ty + checkRadius);
 	}
 
+	/**
+	 * Gets the effective collision hitbox for a character.
+	 * Returns rectangle in world coordinates, or null if character has no sprite.
+	 */
+	private com.watabou.utils.RectF getCharHitbox(Char c) {
+		if (c == null) return null;
+
+		CharSprite sprite = c.sprite;
+		if (sprite != null) {
+			// Use sprite's custom hitbox (properly configured for each enemy)
+			return sprite.getHitbox();
+		}
+
+		// Fallback: create circular hitbox using old radius system
+		int w = Dungeon.level.width();
+		float cx = (c.pos % w);
+		float cy = (c.pos / w);
+		float radius = MOB_COLLISION_RADIUS;
+
+		return new com.watabou.utils.RectF(
+			cx - radius, cy - radius,
+			cx + radius, cy + radius
+		);
+	}
+
+	/**
+	 * Checks if hero's circular collision overlaps with a character's rectangular hitbox.
+	 * Uses proper circle-rectangle collision detection.
+	 */
+	private boolean circleOverlapsRect(float circleX, float circleY, float circleRadius, com.watabou.utils.RectF rect) {
+		if (rect == null) return false;
+
+		// Find closest point on rectangle to circle center
+		float closestX = Math.max(rect.left, Math.min(circleX, rect.right));
+		float closestY = Math.max(rect.top, Math.min(circleY, rect.bottom));
+
+		// Calculate distance from circle center to closest point
+		float dx = circleX - closestX;
+		float dy = circleY - closestY;
+		float distSq = dx * dx + dy * dy;
+
+		// Collision if distance is less than radius
+		return distSq < (circleRadius * circleRadius);
+	}
+
+	/**
+	 * Gets the distance squared from hero to the edge of a character's hitbox.
+	 * Returns 0 if overlapping, positive if separated.
+	 */
+	private float distanceToHitboxSq(float heroX, float heroY, com.watabou.utils.RectF rect) {
+		if (rect == null) return Float.MAX_VALUE;
+
+		// Find closest point on rectangle
+		float closestX = Math.max(rect.left, Math.min(heroX, rect.right));
+		float closestY = Math.max(rect.top, Math.min(heroY, rect.bottom));
+
+		float dx = heroX - closestX;
+		float dy = heroY - closestY;
+
+		return dx * dx + dy * dy;
+	}
+
 	private boolean isHeroStuck() {
-		// Check if hero is very close to any character
+		// Check if hero overlaps or is very close to any character's hitbox
 		if (Dungeon.level == null) return false;
 
-		int w = Dungeon.level.width();
-		float rr = (COLLISION_RADIUS + MOB_COLLISION_RADIUS);
-		float stuckThreshold = (rr * 0.7f) * (rr * 0.7f); // 70% of collision radius
+		// Stuck threshold: hero radius + small overlap allowance
+		float stuckThreshold = COLLISION_RADIUS * 0.5f; // 50% of hero radius
+		float stuckThresholdSq = stuckThreshold * stuckThreshold;
 
 		for (Char c : Actor.chars()) {
 			if (c == this) continue;
-			float cx = (c.pos % w);
-			float cy = (c.pos / w);
-			float dx = exactX - cx;
-			float dy = exactY - cy;
-			float distSq = dx*dx + dy*dy;
 
-			if (distSq < stuckThreshold) {
-				return true; // Stuck near this character
+			// Get character's actual hitbox from sprite
+			com.watabou.utils.RectF hitbox = getCharHitbox(c);
+			if (hitbox == null) continue;
+
+			// Check if hero's center is very close to or inside hitbox
+			float distSq = distanceToHitboxSq(exactX, exactY, hitbox);
+
+			if (distSq < stuckThresholdSq) {
+				return true; // Stuck near/inside this character's hitbox
 			}
 		}
 		return false; // Not stuck
@@ -2977,59 +3041,57 @@ public class Hero extends Char {
 		if (!(Dungeon.level.passable[cell] || Dungeon.level.avoid[cell])) return false;
 		if (Dungeon.level.pit[cell] && !Dungeon.level.solid[cell]) return false;
 
-		// Character collision: improved multi-enemy handling
-		// Strategy: Find closest enemy and allow movement if it improves the situation
-		float rr = (COLLISION_RADIUS + MOB_COLLISION_RADIUS);
-		float rrSq = rr * rr;
+		// HITBOX-BASED CHARACTER COLLISION
+		// Uses actual sprite hitboxes for accurate per-enemy collision sizes
 
-		// Find current minimum distance to any character
+		// Find current closest distance to any character's hitbox
 		float currentMinDistSq = Float.MAX_VALUE;
 		for (Char c : Actor.chars()) {
 			if (c == this) continue;
-			float cx = (c.pos % w);
-			float cy = (c.pos / w);
-			float currentDx = exactX - cx;
-			float currentDy = exactY - cy;
-			float currentDistSq = currentDx*currentDx + currentDy*currentDy;
-			currentMinDistSq = Math.min(currentMinDistSq, currentDistSq);
+			com.watabou.utils.RectF hitbox = getCharHitbox(c);
+			if (hitbox == null) continue;
+
+			float distSq = distanceToHitboxSq(exactX, exactY, hitbox);
+			currentMinDistSq = Math.min(currentMinDistSq, distSq);
 		}
 
-		// Find target minimum distance to any character
+		// Check if target position would collide with any character's hitbox
 		float targetMinDistSq = Float.MAX_VALUE;
 		boolean wouldCollide = false;
 		for (Char c : Actor.chars()) {
 			if (c == this) continue;
-			float cx = (c.pos % w);
-			float cy = (c.pos / w);
-			float dx = sx - cx;
-			float dy = sy - cy;
-			float targetDistSq = dx*dx + dy*dy;
-			targetMinDistSq = Math.min(targetMinDistSq, targetDistSq);
+			com.watabou.utils.RectF hitbox = getCharHitbox(c);
+			if (hitbox == null) continue;
 
-			if (targetDistSq < rrSq) {
+			// Check if hero circle at target position overlaps enemy hitbox
+			if (circleOverlapsRect(sx, sy, COLLISION_RADIUS, hitbox)) {
 				wouldCollide = true;
 			}
+
+			float distSq = distanceToHitboxSq(sx, sy, hitbox);
+			targetMinDistSq = Math.min(targetMinDistSq, distSq);
 		}
 
-		// If we wouldn't collide, allow movement
+		// If we wouldn't collide with any hitboxes, allow movement
 		if (!wouldCollide) return true;
 
-		// If stuck (very close to characters), use reduced collision radius
-		boolean isStuck = currentMinDistSq < (rr * 0.7f) * (rr * 0.7f); // 70% of normal radius
+		// Check if stuck (overlapping or very close to hitboxes)
+		float stuckThresholdSq = (COLLISION_RADIUS * 0.5f) * (COLLISION_RADIUS * 0.5f);
+		boolean isStuck = currentMinDistSq < stuckThresholdSq;
 
 		if (isStuck) {
-			// When stuck, allow any movement that improves the worst collision
-			// This allows squeezing through tight spaces between multiple enemies
+			// When stuck, allow any movement that improves the situation
+			// This allows squeezing out from between multiple enemies
 			if (targetMinDistSq > currentMinDistSq) {
-				return true; // Moving away from closest threat
+				return true; // Moving away from closest hitbox
 			}
-			// Also allow if target is barely better or equal (prevents total lockup)
+			// Allow nearly-equal distance to prevent total lockup
 			if (targetMinDistSq >= currentMinDistSq * 0.95f) {
-				return true; // Allow nearly-same distance when stuck
+				return true; // Minimal improvement allowed when stuck
 			}
 		} else {
-			// Not stuck yet - use stricter collision
-			// Allow movement if it moves away from closest character
+			// Not stuck - use stricter collision
+			// Allow movement if it moves away from hitboxes
 			if (targetMinDistSq > currentMinDistSq) {
 				return true;
 			}
@@ -3227,35 +3289,60 @@ public class Hero extends Char {
 	private void applyEnemySeparation(float deltaTime) {
 		if (Dungeon.level == null) return;
 
-		int w = Dungeon.level.width();
-		float separationForce = 2.0f; // tiles per second when fully overlapping
-		float minDist = COLLISION_RADIUS + MOB_COLLISION_RADIUS;
-		float minDistSq = minDist * minDist;
+		float separationForce = 2.5f; // tiles per second when fully overlapping (increased for hitboxes)
 
 		float pushX = 0f;
 		float pushY = 0f;
 		int pushCount = 0;
 
-		// Check all nearby characters
+		// HITBOX-BASED SEPARATION
+		// Push hero away from overlapping enemy hitboxes
 		for (Char c : Actor.chars()) {
 			if (c == this || !c.isAlive()) continue;
 
-			float cx = (c.pos % w);
-			float cy = (c.pos / w);
-			float dx = exactX - cx;
-			float dy = exactY - cy;
+			com.watabou.utils.RectF hitbox = getCharHitbox(c);
+			if (hitbox == null) continue;
+
+			// Check if hero circle overlaps enemy hitbox
+			if (!circleOverlapsRect(exactX, exactY, COLLISION_RADIUS, hitbox)) {
+				continue; // No overlap, no separation needed
+			}
+
+			// Find closest point on hitbox to hero
+			float closestX = Math.max(hitbox.left, Math.min(exactX, hitbox.right));
+			float closestY = Math.max(hitbox.top, Math.min(exactY, hitbox.bottom));
+
+			// Push direction: from closest point to hero center
+			float dx = exactX - closestX;
+			float dy = exactY - closestY;
 			float distSq = dx * dx + dy * dy;
 
-			// If within minimum separation distance, apply repulsion
-			if (distSq < minDistSq && distSq > 0.0001f) {
+			if (distSq > 0.0001f) {
 				float dist = (float)Math.sqrt(distSq);
-				float overlap = minDist - dist;
-				float strength = overlap / minDist; // 0 to 1, where 1 = fully overlapping
+
+				// Overlap amount: how far hero circle penetrates hitbox
+				float overlap = COLLISION_RADIUS - dist;
+
+				// Strength increases with overlap (0 to 1+, can exceed 1 if deeply overlapped)
+				float strength = Math.max(0f, overlap / COLLISION_RADIUS);
 
 				// Normalize and accumulate push direction
 				pushX += (dx / dist) * strength;
 				pushY += (dy / dist) * strength;
 				pushCount++;
+			} else {
+				// Hero center is exactly on or inside hitbox - push away from hitbox center
+				float hitboxCenterX = (hitbox.left + hitbox.right) / 2f;
+				float hitboxCenterY = (hitbox.top + hitbox.bottom) / 2f;
+				float centerDx = exactX - hitboxCenterX;
+				float centerDy = exactY - hitboxCenterY;
+				float centerDist = (float)Math.sqrt(centerDx*centerDx + centerDy*centerDy);
+
+				if (centerDist > 0.0001f) {
+					pushX += (centerDx / centerDist);
+					pushY += (centerDy / centerDist);
+					pushCount++;
+				}
 			}
 		}
 
